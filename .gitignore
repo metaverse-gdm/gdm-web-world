@@ -1,0 +1,31 @@
+# dependencies / build output
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+.vite/
+.vitest/
+
+# environment & credentials (only .env.example is committed)
+.env
+.env.*
+!.env.example
+*.cred
+*.pem
+*.key
+*.p12
+*.pfx
+.deploy-manifest.json
+
+# logs
+*.log
+npm-debug.log*
+
+# editors / OS / local agent settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/settings.local.json

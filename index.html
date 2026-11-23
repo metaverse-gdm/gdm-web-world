@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      // Apply a shared theme choice before the stylesheet and app load.
+      try {
+        const theme = localStorage.getItem('tc-theme')
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+      } catch {}
+    </script>
+    <meta name="description" content="ゲーム、ツール、アプリを共有する P2P プロジェクトカタログ。" />
+    <link rel="canonical" href="https://gdm.tik-choco.com/worlds/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="GDM World" />
+    <meta property="og:url" content="https://gdm.tik-choco.com/worlds/" />
+    <meta property="og:image" content="https://gdm.tik-choco.com/worlds/brand-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./brand-icon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./brand-icon-180.png" />
+    <title>GDM World</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
