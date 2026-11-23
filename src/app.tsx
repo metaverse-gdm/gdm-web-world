@@ -124,7 +124,7 @@ function AppShell({ route, runtime, failed, lang, setLang }: {
       <span>© GDM World</span>
       <ul class="footer-links">
         {canRequest && route.page !== 'new' && <li><a href="#/new">{t.requestAccess}</a></li>}
-        <li><a href="https://github.com/tik-choco" target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only">{t.opensInNewTab}</span></a></li>
+        <li><a href="https://github.com/metaverse-gdm/gdm-web-world" target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only">{t.opensInNewTab}</span></a></li>
       </ul>
     </footer>
   </ToastProvider>

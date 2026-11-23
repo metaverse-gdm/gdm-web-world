@@ -28,7 +28,7 @@ tc-game と同じ方式で、`dist/` のうち前回から変わったファイ�
 
 1. `.env.example` を `.env` にコピーし、`FTPS_HOST` / `FTPS_USER` / `FTPS_REMOTE_DIR`（既定 `/gdm/worlds`）と `VITE_ROOT_ADMIN_DIDS` を設定します。
 2. `just ftps-login` でパスワードを保存します（Windows の DPAPI で暗号化、tc-game / tc-linkai と共有）。
-3. `just deploy`（確認だけなら `just deploy --dry`）。
+3. `develop` ブランチで変更をコミットしてから `just deploy`（`guru merge main` で develop を main にマージ・push して develop に戻り、ビルドしてアップロード。ブランチは削除しない）。確認だけなら `just deploy --dry`（この場合もマージは行われる）。
 
 ## 最初の管理者を設定
 
