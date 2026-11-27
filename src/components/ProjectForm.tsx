@@ -12,6 +12,7 @@ import { aiConfigured, subscribeAiSettings } from '../lib/ai/settings'
 import { BackLink, CopyDid, ErrorText } from './common'
 import { FilePicker } from './FilePicker'
 import { showAdvancedSettings, showAiSettings } from './Settings'
+import { Select } from './Select'
 import { mergeTags, TagInput } from './TagInput'
 import { Thumbnail } from './Thumbnail'
 import { ToastContext } from './Toast'
@@ -50,8 +51,8 @@ export function ApprovalPrompt({ runtime }: { runtime: Runtime }) {
 }
 
 function fromProject(project: ProjectRecord): Draft {
-  const { title, summary, description, lang, translations, url, repoUrl, tags, thumbnailCid, thumbnailUrl } = project
-  return { title, summary, description, lang, translations, url, repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl }
+  const { title, summary, description, lang, translations, url, repoUrl, tags, thumbnailCid, thumbnailUrl, groupId } = project
+  return { title, summary, description, lang, translations, url, repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl, groupId }
 }
 
 const emptyText: ProjectText = { title: '', summary: '', description: '' }
@@ -92,6 +93,10 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   const panelId = (language: Language) => `${ids}-panel-${language}`
   const imageInputId = ids + '-image'
   const canTranslate = !!draft.title.trim()
+  const self = runtime.getSelf().id
+  const myGroups = [...runtime.getCatalog().groups.values()].filter(group => group.members.includes(self))
+  // A group the author has since left is dropped rather than blocking the save.
+  const groupId = myGroups.some(group => group.record.groupId === draft.groupId) ? draft.groupId : undefined
   const emptyLanguages = languages.filter(language => language !== primary && !hasText(textFor(draft, primary, language)))
 
   useLayoutEffect(() => {
@@ -194,6 +199,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
           translations: others.length ? Object.fromEntries(others.map(({ language, text }) => [language, text])) : undefined,
           url: value.url.trim(), repoUrl: value.repoUrl.trim() || undefined,
           tags: mergeTags(mergeTags([], value.tags), pendingTag), thumbnailCid: value.thumbnailCid, thumbnailUrl,
+          ...(groupId ? { groupId } : {}),
         }, project?.projectId)
         runtime.preferences.setDraft(slot, null)
         location.hash = `#/p/${id}`
@@ -250,6 +256,8 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
         </div>
         <TagInput tags={mergeTags([], draft.tags)} pending={pendingTag} onPendingChange={setPendingTag}
           onChange={tags => update({ tags: tags.join(', ') })} />
+        {myGroups.length > 0 && <Select label={t.group} value={groupId ?? ''} onChange={value => update({ groupId: value || undefined })}
+          options={[{ value: '', label: t.noGroup }, ...myGroups.map(group => ({ value: group.record.groupId, label: group.record.name }))]} />}
         <div class="form-columns">
           <FilePicker label={t.thumbnail} choose={t.chooseImage} hint={t.dropImage}
             accept="image/jpeg,image/png,image/webp" disabled={form.busy || upload.busy}

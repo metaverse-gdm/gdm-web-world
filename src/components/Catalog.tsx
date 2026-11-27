@@ -1,15 +1,17 @@
 import { useContext, useMemo, useRef, useState } from 'preact/hooks'
 import { documentLanguages, LanguageContext, useMessages } from '../i18n'
 import { compareStrings } from '../lib/wireSign'
+import type { GroupView } from '../lib/catalogStore'
 import type { ProjectRecord, StatsMetric } from '../lib/wires'
 import { EmptyState } from './common'
 import { Icon } from './Icon'
 import { ProjectGrid } from './ProjectGrid'
 import { Select } from './Select'
 
-export function CatalogPage({ projects, displayNameFor, trackProject, impressionsActive }: {
+export function CatalogPage({ projects, displayNameFor, groupFor, trackProject, impressionsActive, label, emptyMessage }: {
   projects: ReadonlyMap<string, ProjectRecord>; displayNameFor(did: string): string | undefined
-  trackProject(id: string, metric: StatsMetric): void; impressionsActive: boolean
+  groupFor(project: ProjectRecord): GroupView | undefined
+  trackProject(id: string, metric: StatsMetric): void; impressionsActive: boolean; label?: string; emptyMessage?: string
 }) {
   const t = useMessages()
   const locale = documentLanguages[useContext(LanguageContext)]
@@ -44,10 +46,10 @@ export function CatalogPage({ projects, displayNameFor, trackProject, impression
       ]} />
     </div>
     <span class="sr-only" role="status">{t.results(shown.length)}</span>
-    <ProjectGrid projects={shown} order={order} label={t.catalog} displayNameFor={displayNameFor}
+    <ProjectGrid projects={shown} order={order} label={label ?? t.catalog} displayNameFor={displayNameFor} groupFor={groupFor}
       trackProject={trackProject} impressionsActive={impressionsActive} />
     {shown.length === 0 && (entries.length === 0
-      ? <EmptyState message={t.noProjects} />
+      ? <EmptyState message={emptyMessage ?? t.noProjects} />
       : <EmptyState message={t.noMatches}>
           <button type="button" onClick={() => { setTag(''); setQuery('') }}>{t.clearFilters}</button>
         </EmptyState>)}

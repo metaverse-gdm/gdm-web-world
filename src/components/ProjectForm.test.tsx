@@ -23,7 +23,9 @@ afterEach(() => { act(() => render(null, host)); host.remove(); vi.restoreAllMoc
 function setup() {
   const preferences = createLocalPreferences()
   const saveProject = vi.fn(async () => PROJECT_ID)
-  const runtime = { preferences, saveProject } as unknown as Runtime
+  const runtime = {
+    preferences, saveProject, getSelf: () => ({ id: 'did:key:self' }), getCatalog: () => ({ groups: new Map() }),
+  } as unknown as Runtime
   function Harness() {
     const [, refresh] = useState(0)
     useEffect(() => preferences.subscribe(() => refresh(n => n + 1)), [])

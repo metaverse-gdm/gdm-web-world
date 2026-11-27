@@ -4,7 +4,7 @@ import type { ProjectFields, ProjectText } from './wires'
 
 const KEY = 'gdm-world:preferences:v1'
 export type Theme = 'light' | 'dark'
-export type Draft = ProjectText & Pick<ProjectFields, 'lang' | 'translations' | 'thumbnailCid' | 'thumbnailUrl'> & {
+export type Draft = ProjectText & Pick<ProjectFields, 'lang' | 'translations' | 'thumbnailCid' | 'thumbnailUrl' | 'groupId'> & {
   url: string; repoUrl: string; tags: string
 }
 type Entry<T> = { at: number; value: T }
@@ -16,8 +16,9 @@ const emptyPreferences = (): Preferences => ({ v: 1, drafts: {} })
 const validTheme = (value: unknown): value is Theme => value === 'light' || value === 'dark'
 const validSlot = (slot: string) => slot === 'new' || validId(slot)
 const validDraft = (value: unknown): value is Draft => isObject(value)
-  && hasOnly(value, ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl'])
+  && hasOnly(value, ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'groupId'])
   && validProjectLanguages(value, true)
+  && (value.groupId === undefined || validId(value.groupId))
   && bounded(value.title, LIMITS.title, true) && bounded(value.summary, LIMITS.summary, true)
   && bounded(value.description, LIMITS.description, true) && bounded(value.url, LIMITS.url, true)
   && bounded(value.repoUrl, LIMITS.url, true) && bounded(value.tags, LIMITS.tags * (LIMITS.tag + 2), true)

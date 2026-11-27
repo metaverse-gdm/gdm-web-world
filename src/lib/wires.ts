@@ -11,8 +11,8 @@ import { isSignature, verifyWire } from './wireSign'
 export const LIMITS = {
   title: 100, summary: 240, description: 4000, url: 512, tags: 8, tag: 24,
   // Leave room for mistlib's framing within its 64 KiB transport limit.
-  displayName: 48, request: 600, note: 240, wireBytes: 63 * 1024, recordBytes: 56 * 1024, syncKeys: 128, syncRecords: 64,
-  statsProjects: 200, statsBytes: 10 * 1024,
+  displayName: 48, bio: 1000, request: 600, note: 240, wireBytes: 63 * 1024, recordBytes: 56 * 1024, syncKeys: 128, syncRecords: 64,
+  statsProjects: 200, statsBytes: 10 * 1024, groupName: 48, groupMembers: 50,
 } as const
 export const REQUEST_INTERVAL_MS = 60_000
 export type Role = 'member' | 'admin'
@@ -22,6 +22,8 @@ export type ProjectText = { title: string; summary: string; description: string 
 export type ProjectFields = ProjectText & {
   lang?: Language; translations?: Partial<Record<Language, ProjectText>>
   url: string; repoUrl?: string; tags: string[]; thumbnailCid?: string; thumbnailUrl?: string
+  /** Shown under the group only while the author is one of its current members. */
+  groupId?: string
 }
 type ProjectUpsert = ProjectFields & {
   type: 'gdmw:project-upsert'; projectId: string; createdAt: number; updatedAt: number; rev: number
@@ -32,7 +34,14 @@ type Approval = {
   requestSignature?: string
 }
 type Revocation = { type: 'gdmw:revocation'; subject: string; revokedAt: number }
-type Profile = { type: 'gdmw:profile'; displayName: string; updatedAt: number }
+export type GroupFields = { name: string; bio?: string; members: string[] }
+type GroupUpsert = GroupFields & {
+  type: 'gdmw:group-upsert'; groupId: string; createdAt: number; updatedAt: number; rev: number
+}
+type GroupDelete = { type: 'gdmw:group-delete'; groupId: string; deletedAt: number }
+/** Signed by an invited person to accept (`joined`) or leave a group. */
+type GroupMembership = { type: 'gdmw:group-membership'; groupId: string; joined: boolean; updatedAt: number }
+type Profile = { type: 'gdmw:profile'; displayName: string; bio?: string; updatedAt: number }
 type ApprovalRequest = { type: 'gdmw:approval-request'; displayName: string; message: string; requestedAt: number }
 type RequestReject = { type: 'gdmw:request-reject'; subject: string; requestSignature: string; rejectedAt: number }
 export const STATS_FLAGS = { impression: 1, detail: 2, click: 4 } as const
@@ -44,6 +53,7 @@ type SyncRecords = { type: 'gdmw:sync-records'; records: SignedRecord[] }
 type Config = { type: 'gdmw:vault-config'; config: VaultConfig; configuredAt?: number }
 
 export type CatalogPayload = ProjectUpsert | ProjectDelete | Approval | Revocation | Profile
+  | GroupUpsert | GroupDelete | GroupMembership
 export type RequestPayload = ApprovalRequest | RequestReject
 export type WirePayload = CatalogPayload | RequestPayload | Stats | Digest | Want | SyncRecords | Config
 
@@ -60,6 +70,9 @@ export type PolicyRecord = Verified<(Approval | Revocation) & Envelope>
 export type ProjectRecord = Verified<ProjectUpsert & Envelope>
 export type DeleteRecord = Verified<ProjectDelete & Envelope>
 export type ProfileRecord = Verified<Profile & Envelope>
+export type GroupRecord = Verified<GroupUpsert & Envelope>
+export type GroupDeleteRecord = Verified<GroupDelete & Envelope>
+export type MembershipRecord = Verified<GroupMembership & Envelope>
 
 export const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -103,7 +116,7 @@ export function validProjectLanguages({ lang, translations }: Record<string, unk
     && hasOnly(text, ['title', 'summary', 'description']) && validProjectText(text, draft))
 }
 
-const projectKeys = ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl']
+const projectKeys = ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'groupId']
 export function validProjectFields(value: Record<string, unknown>): boolean {
   return validProjectText(value, false) && validProjectLanguages(value) && isHttpUrl(value.url)
     && (value.repoUrl === undefined || isHttpUrl(value.repoUrl))
@@ -112,6 +125,14 @@ export function validProjectFields(value: Record<string, unknown>): boolean {
     && new Set(value.tags).size === value.tags.length
     && (value.thumbnailCid === undefined || validCid(value.thumbnailCid))
     && (value.thumbnailUrl === undefined || value.thumbnailCid === undefined && isHttpsUrl(value.thumbnailUrl))
+    && (value.groupId === undefined || validId(value.groupId))
+}
+
+export function validGroupFields(value: Record<string, unknown>): boolean {
+  return bounded(value.name, LIMITS.groupName) && value.name.trim() === value.name
+    && (value.bio === undefined || bounded(value.bio, LIMITS.bio) && value.bio.trim() === value.bio)
+    && Array.isArray(value.members) && value.members.length <= LIMITS.groupMembers
+    && value.members.every(validDid) && new Set(value.members).size === value.members.length
 }
 
 const envelopeKeys = ['v', 'type', 'roomId', 'fromId', 'signature', 'delegation']
@@ -136,8 +157,18 @@ function validate(value: unknown, recordsOnly = false): value is Wire {
     case 'gdmw:revocation':
       return fields('subject', 'revokedAt') && validDid(value.subject) && validDate(value.revokedAt)
     case 'gdmw:profile':
-      return fields('displayName', 'updatedAt') && bounded(value.displayName, LIMITS.displayName)
+      return fields('displayName', 'bio', 'updatedAt') && bounded(value.displayName, LIMITS.displayName)
         && value.displayName.trim() === value.displayName && validDate(value.updatedAt)
+        && (value.bio === undefined || bounded(value.bio, LIMITS.bio) && value.bio.trim() === value.bio)
+    case 'gdmw:group-upsert':
+      return fields('groupId', 'createdAt', 'updatedAt', 'rev', 'name', 'bio', 'members')
+        && validId(value.groupId) && validDate(value.createdAt) && validDate(value.updatedAt)
+        && value.updatedAt >= value.createdAt && validInteger(value.rev, Number.MAX_SAFE_INTEGER) && validGroupFields(value)
+    case 'gdmw:group-delete':
+      return fields('groupId', 'deletedAt') && validId(value.groupId) && validDate(value.deletedAt)
+    case 'gdmw:group-membership':
+      return fields('groupId', 'joined', 'updatedAt') && validId(value.groupId) && typeof value.joined === 'boolean'
+        && validDate(value.updatedAt)
     case 'gdmw:approval-request':
       return fields('displayName', 'message', 'requestedAt') && bounded(value.displayName, LIMITS.displayName)
         && bounded(value.message, LIMITS.request, true) && validDate(value.requestedAt)
@@ -181,8 +212,11 @@ function signedTime(wire: Wire): number | undefined {
   switch (wire.type) {
     case 'gdmw:project-upsert':
     case 'gdmw:stats':
-    case 'gdmw:profile': return wire.updatedAt
-    case 'gdmw:project-delete': return wire.deletedAt
+    case 'gdmw:profile':
+    case 'gdmw:group-upsert':
+    case 'gdmw:group-membership': return wire.updatedAt
+    case 'gdmw:project-delete':
+    case 'gdmw:group-delete': return wire.deletedAt
     case 'gdmw:approval': return wire.issuedAt
     case 'gdmw:revocation': return wire.revokedAt
     case 'gdmw:approval-request': return wire.requestedAt
@@ -227,6 +261,7 @@ export function readRecord(value: unknown, now = Date.now()): VerifiedRecord | u
 export function isCatalog(record: Wire): record is CatalogPayload & Envelope {
   return record.type === 'gdmw:project-upsert' || record.type === 'gdmw:project-delete'
     || record.type === 'gdmw:approval' || record.type === 'gdmw:revocation' || record.type === 'gdmw:profile'
+    || record.type === 'gdmw:group-upsert' || record.type === 'gdmw:group-delete' || record.type === 'gdmw:group-membership'
 }
 export function isRecord(wire: Verified): wire is VerifiedRecord {
   return isCatalog(wire) || wire.type === 'gdmw:approval-request' || wire.type === 'gdmw:request-reject' || wire.type === 'gdmw:stats'

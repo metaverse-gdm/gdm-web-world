@@ -1,7 +1,7 @@
 import { ROOT_ADMIN_DIDS } from '../config'
 import { ensureSharedDidIdentity } from '../crypto/didIdentity'
 import { policyTime } from './authz'
-import { createRecordStore, deriveCatalog } from './catalogStore'
+import { createRecordStore, deriveCatalog, projectGroup } from './catalogStore'
 import { createLocalPerson } from './didPairing'
 import { DAY_MS } from './delegation'
 import { catalogReplica, identityBackend, opfsReplica } from './mistClient'
@@ -15,8 +15,8 @@ import { createStatsPublisher } from './statsPublisher'
 import { createStatsStore, parseStatsSnapshot, STATS_KEY } from './statsStore'
 import { createCatalogAdapter } from './vault/catalogAdapter'
 import { createSharedVault } from './vault/controllers'
-import { bounded, isCatalog, LIMITS, makeWire, personId, REQUEST_INTERVAL_MS, validProjectFields } from './wires'
-import type { CatalogRecord, ProjectFields, RequestRecord, Role, StatsMetric, StatsRecord, VerifiedRecord } from './wires'
+import { bounded, isCatalog, LIMITS, makeWire, personId, REQUEST_INTERVAL_MS, validGroupFields, validProjectFields } from './wires'
+import type { CatalogRecord, GroupFields, ProjectFields, ProjectRecord, RequestRecord, Role, StatsMetric, StatsRecord, VerifiedRecord } from './wires'
 
 const transientIdentity = new Map<string, string>()
 const identityStorage = {
@@ -132,16 +132,20 @@ export async function createRuntime() {
     network.send(null, wire)
   }
   const statsPublisher = createStatsPublisher({ identity, selfId: () => localPerson.get().id, store: stats, ready: statsMirror.ready, publish })
-  function writeProfile(did: string, name: string, onlyIfMissing = false) {
+  /** `bio` undefined keeps the current signed bio; an empty string clears it. */
+  function writeProfile(did: string, name: string, onlyIfMissing = false, bio?: string) {
     const operation = profileWrites.then(async () => {
       await mirror.ready
       const eligible = () => !disposed && localPerson.get().id === did && !!current().roles.get(did)
         && (!onlyIfMissing || preferences.get().displayName?.value.trim() === name)
       while (eligible()) {
         const previous = catalog.profiles.get(did)
-        if (previous && (onlyIfMissing || previous.displayName === name)) return
+        const nextBio = bio ?? previous?.bio ?? ''
+        if (previous && (onlyIfMissing || previous.displayName === name && (previous.bio ?? '') === nextBio)) return
         const updatedAt = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1)
-        const wire = await makeWire(identity, { type: 'gdmw:profile', displayName: name, updatedAt })
+        const wire = await makeWire(identity, {
+          type: 'gdmw:profile', displayName: name, ...(nextBio ? { bio: nextBio } : {}), updatedAt,
+        })
         if (!eligible() || personId(wire) !== did) return
         // A peer may have updated the same profile while this leaf was signing.
         if (catalog.profiles.get(did)?.signature !== previous?.signature) continue
@@ -168,6 +172,14 @@ export async function createRuntime() {
     const did = localPerson.get().id
     if (name !== preferences.get().displayName?.value) preferences.setName(name)
     if (name) await writeProfile(did, name)
+  }
+  async function saveProfile(value: { displayName: string; bio: string }) {
+    const name = value.displayName.trim()
+    const bio = value.bio.trim()
+    if (!bounded(name, LIMITS.displayName) || !bounded(bio, LIMITS.bio, true)) throw new Error('入力内容を確認してください。')
+    const did = requireMember()
+    if (name !== preferences.get().displayName?.value) preferences.setName(name)
+    await writeProfile(did, name, false, bio)
   }
   bootstrapProfile()
   const requireAdmin = () => {
@@ -206,7 +218,14 @@ export async function createRuntime() {
       const { roles, profiles } = current()
       if (roles.get(did)) return profiles.get(did)?.displayName ?? requests.latest(did)?.displayName.trim()
     },
+    groupFor: (project: ProjectRecord) => projectGroup(current(), project),
+    /** The signed self-introduction of a current member, if any. */
+    bioFor(did: string) {
+      const { roles, profiles } = current()
+      if (roles.get(did)) return profiles.get(did)?.bio
+    },
     saveDisplayName,
+    saveProfile,
     getRequests: () => isAdmin(localPerson.get().id) ? pendingRequests(requests.get(), store.get(), current().roles) : [],
     getKnownLeaves() {
       const leaves = new Map<string, Set<string>>()
@@ -234,6 +253,9 @@ export async function createRuntime() {
       const author = localPerson.get().id
       const previous = check()
       if (!validProjectFields(fields)) throw new Error('入力内容を確認してください。URL は http:// または https:// で入力してください。')
+      if (fields.groupId !== undefined && !current().groups.get(fields.groupId)?.members.includes(author)) {
+        throw new Error('参加しているグループを選んでください。')
+      }
       const projectId = id ?? crypto.randomUUID()
       const updatedAt = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1)
       const wire = await makeWire(identity, {
@@ -261,6 +283,69 @@ export async function createRuntime() {
       })
       requireSamePerson(wire, author)
       if (check().signature !== project.signature) throw new Error('更新されたプロジェクトを開き直してください。')
+      publish(wire)
+    },
+    async saveGroup(fields: GroupFields, id?: string) {
+      const check = () => {
+        const owner = requireMember()
+        const previous = id ? current().groups.get(id) : undefined
+        if (id && previous?.owner !== owner) throw new Error('このグループを編集できません。')
+        return previous?.record
+      }
+      const owner = localPerson.get().id
+      const previous = check()
+      const value: GroupFields = {
+        name: fields.name.trim(),
+        ...(fields.bio?.trim() ? { bio: fields.bio.trim() } : {}),
+        members: [...new Set(fields.members)].filter(did => did !== owner),
+      }
+      if (!validGroupFields(value)) throw new Error('入力内容を確認してください。')
+      const groupId = id ?? crypto.randomUUID()
+      const updatedAt = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1)
+      const wire = await makeWire(identity, {
+        ...value, type: 'gdmw:group-upsert', groupId,
+        updatedAt, createdAt: previous?.createdAt ?? updatedAt, rev: (previous?.rev ?? 0) + 1,
+      })
+      requireSamePerson(wire, owner)
+      if (check()?.signature !== previous?.signature) throw new Error('更新されたグループを開き直してください。')
+      publish(wire)
+      return groupId
+    },
+    async deleteGroup(groupId: string) {
+      const check = () => {
+        const actor = requireMember()
+        const group = current().groups.get(groupId)
+        if (!group || !(group.owner === actor || isAdmin(actor))) throw new Error('このグループを削除できません。')
+        return group.record
+      }
+      const actor = localPerson.get().id
+      const group = check()
+      const wire = await makeWire(identity, {
+        type: 'gdmw:group-delete', groupId, deletedAt: Math.max(Date.now(), group.updatedAt),
+      })
+      requireSamePerson(wire, actor)
+      if (check().signature !== group.signature) throw new Error('更新されたグループを開き直してください。')
+      publish(wire)
+    },
+    /** Accept an invitation (`joined`), or decline it or leave. The owner leaves by deleting the group. */
+    async setGroupMembership(groupId: string, joined: boolean) {
+      const check = () => {
+        const member = requireMember()
+        const group = current().groups.get(groupId)
+        if (!group || group.owner === member
+          || !(joined ? [...group.invited, ...group.declined] : [...group.members, ...group.invited]).includes(member)) {
+          throw new Error('グループの参加状態を変更できません。')
+        }
+        return member
+      }
+      const member = check()
+      const previous = store.get().reduce<number>((latest, record) => record.type === 'gdmw:group-membership'
+        && record.groupId === groupId && personId(record) === member ? Math.max(latest, record.updatedAt) : latest, 0)
+      const wire = await makeWire(identity, {
+        type: 'gdmw:group-membership', groupId, joined, updatedAt: Math.max(Date.now(), previous + 1),
+      })
+      requireSamePerson(wire, member)
+      check()
       publish(wire)
     },
     async approve(subject: string, role: Role, requestSignature?: string) {

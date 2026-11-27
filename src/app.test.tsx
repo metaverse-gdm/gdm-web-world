@@ -7,7 +7,9 @@ import { createLocalPreferences } from './lib/localPreferences'
 import { createRuntime } from './lib/runtime'
 import type { Runtime } from './lib/runtime'
 import { createStatsStore } from './lib/statsStore'
-import type { ProjectRecord, Role } from './lib/wires'
+import { projectGroup } from './lib/catalogStore'
+import type { GroupView } from './lib/catalogStore'
+import type { GroupRecord, ProjectRecord, Role } from './lib/wires'
 import { reducedMotionQuery } from './styles/motion'
 import { PROJECT_ID, upsert } from './test/fixtures'
 
@@ -42,7 +44,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public') {
+async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public',
+  groupsFor: (self: string) => Map<string, GroupView> = () => new Map()) {
   let refresh: () => void
   const deleteProject = vi.fn(async () => {
     projects = new Map()
@@ -52,11 +55,18 @@ async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public'
   const roles = new Map<string, Role>(viewer === 'public' ? [] : [[id, viewer === 'admin' ? 'admin' : 'member']])
   const trackProject = vi.fn()
   const getProjectStats = vi.fn(() => createStatsStore().summary(PROJECT_ID, project.fromId))
+  const saveProfile = vi.fn(async () => {})
+  const setGroupMembership = vi.fn(async () => {})
+  const groups = groupsFor(id)
   vi.mocked(createRuntime).mockResolvedValue({
     getSelf: () => ({ id }),
-    getCatalog: () => ({ projects, roles }),
+    getCatalog: () => ({ projects, roles, groups }),
+    groupFor: (record: ProjectRecord) => projectGroup({ groups }, record),
+    setGroupMembership,
     getNetwork: () => ({ status: 'joined', peers: 0 }),
-    displayNameFor: () => undefined,
+    displayNameFor: (did: string) => did === project.fromId ? 'Team Sakura' : undefined,
+    bioFor: (did: string) => did === project.fromId ? 'We make **games**.' : undefined,
+    saveProfile,
     subscribe(listener: () => void) {
       refresh = listener
       return () => {}
@@ -70,6 +80,8 @@ async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public'
   await act(async () => render(<App />, host))
   return {
     deleteProject,
+    saveProfile,
+    setGroupMembership,
     trackProject,
     getProjectStats,
     setProjects(next: ReadonlyMap<string, ProjectRecord>) {
@@ -231,4 +243,100 @@ it('tracks primary-link activation from both the catalog and dialog', async () =
   const detailLink = dialog().querySelector<HTMLAnchorElement>('a.primary')!
   act(() => { detailLink.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })) })
   expect(trackProject.mock.calls).toEqual([[PROJECT_ID, 'click'], [PROJECT_ID, 'detail'], [PROJECT_ID, 'click']])
+})
+
+it('opens the author page from a card and keeps it behind a project opened there', async () => {
+  await setup()
+  const author = host.querySelector<HTMLAnchorElement>('.work-meta .author-link')!
+  expect(author.textContent).toBe('Team Sakura')
+  expect(author.getAttribute('href')).toBe(`#/u/${project.fromId}`)
+  await act(async () => {
+    location.hash = author.getAttribute('href')!
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  const profile = host.querySelector<HTMLElement>('.profile-panel')!
+  expect(profile.querySelector('h1')!.textContent).toBe('Team Sakura')
+  expect(profile.querySelector('.profile-bio strong')!.textContent).toBe('games')
+  expect(profile.querySelector('[aria-label="Edit profile"]')).toBeNull()
+  expect(host.querySelectorAll('.work-grid > li')).toHaveLength(1)
+
+  const opener = card()
+  act(() => opener.click())
+  expect(location.hash).toBe(detailHash)
+  expect(dialog().open).toBe(true)
+  expect(host.querySelector('.profile-panel')).toBe(profile)
+  expect(card()).toBe(opener)
+})
+
+it('lets an approved author edit their profile on their own page', async () => {
+  history.replaceState(null, '', `#/u/${project.fromId}`)
+  const { saveProfile } = await setup('author')
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Edit profile"]')!.click())
+  const form = host.querySelector<HTMLFormElement>('.profile-editor')!
+  form.querySelector('textarea')!.value = 'Hello'
+  await act(async () => { form.requestSubmit() })
+  expect(saveProfile).toHaveBeenCalledWith({ displayName: 'Team Sakura', bio: 'Hello' })
+  expect(host.querySelector('.profile-editor')).toBeNull()
+})
+
+it("shows only the chosen person's projects and an empty state for others", async () => {
+  const other = (await createDidIdentity()).did
+  history.replaceState(null, '', `#/u/${other}`)
+  await setup()
+  expect(host.querySelector('.profile-panel h1')!.textContent).toBe('No name set')
+  expect(host.querySelector('.work-grid > li')).toBeNull()
+  expect(host.querySelector('.empty-state')!.textContent).toBe('No public projects yet.')
+})
+
+const GROUP_ID = '7c1e3d0a-5b2f-4c8d-9e6a-1f2b3c4d5e6f'
+function circle(invited: string[] = []): Map<string, GroupView> {
+  const record = { groupId: GROUP_ID, name: 'Sakura Circle', bio: 'A **game** circle.', members: invited, updatedAt: 30 } as unknown as GroupRecord
+  return new Map([[GROUP_ID, { record, owner: project.fromId, members: [project.fromId], invited, declined: [] }]])
+}
+
+it('keeps the groups page heading accessible without displaying a redundant title', async () => {
+  history.replaceState(null, '', '#/groups')
+  await setup('member', () => circle())
+  const page = host.querySelector('.groups-page')!
+  const heading = page.querySelector('h1.sr-only')!
+  expect(heading.textContent).toBe('Groups')
+  expect(page.getAttribute('aria-labelledby')).toBe(heading.id)
+  expect(page.querySelector('.row-between .back-link')).not.toBeNull()
+  expect(page.querySelector('.row-between a[href="#/g/new"]')).not.toBeNull()
+  expect(page.querySelector('.group-card h2')!.textContent).toBe('Sakura Circle')
+})
+
+it('links a grouped project to its group page and lets an invitee join from there', async () => {
+  project = await upsert(await createDidIdentity(), { title: 'Train timetable', groupId: GROUP_ID })
+  projects = new Map([[PROJECT_ID, project]])
+  const { setGroupMembership } = await setup('member', self => circle([self]))
+  const nav = host.querySelector<HTMLAnchorElement>('.nav-groups')!
+  expect(nav.querySelector('.nav-dot')).not.toBeNull()
+  const link = host.querySelector<HTMLAnchorElement>('.work-meta .group-link')!
+  expect(link.textContent).toBe('Sakura Circle')
+  await act(async () => {
+    location.hash = link.getAttribute('href')!
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  const panel = host.querySelector<HTMLElement>('.profile-panel')!
+  expect(panel.querySelector('h1')!.textContent).toBe('Sakura Circle')
+  expect(panel.querySelector('.profile-bio strong')!.textContent).toBe('game')
+  expect([...panel.querySelectorAll('.member-list > li')].map(item => item.textContent)).toEqual(['Team SakuraOwner', expect.stringContaining('Invited')])
+  expect(host.querySelectorAll('.work-grid > li')).toHaveLength(1)
+  const join = [...panel.querySelectorAll('button')].find(button => button.textContent === 'Join')!
+  await act(async () => join.click())
+  expect(setGroupMembership).toHaveBeenCalledWith(GROUP_ID, true)
+})
+
+it('hides pending invitations from other viewers and shows a missing group', async () => {
+  history.replaceState(null, '', `#/g/${GROUP_ID}`)
+  await setup('public', () => circle([project.fromId.replace(/.$/, 'x')]))
+  expect(host.querySelectorAll('.member-list > li')).toHaveLength(1)
+  expect(host.querySelector('.membership-actions')).toBeNull()
+  expect(host.querySelector('.nav-dot')).toBeNull()
+  await act(async () => {
+    location.hash = '#/g/00000000-0000-4000-8000-000000000000'
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  expect(host.querySelector('.empty-state')!.textContent).toContain('Group not found.')
 })

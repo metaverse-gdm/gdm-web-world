@@ -5,7 +5,8 @@ import type { ProjectRecord } from '../lib/wires'
 import { personId } from '../lib/wires'
 import { useAction } from '../hooks/useAction'
 import { documentLanguages, LanguageContext, useMessages } from '../i18n'
-import { BackLink, ConfirmDialog, DateText, ErrorText, ExternalLink, PersonName, Tags } from './common'
+import { AuthorLink, BackLink, ConfirmDialog, DateText, ErrorText, ExternalLink, Tags } from './common'
+import { GroupLink } from './Groups'
 import { Icon } from './Icon'
 import { MarkdownView } from './MarkdownView'
 import { ProjectStats } from './ProjectStats'
@@ -24,6 +25,7 @@ export function ProjectDetail(props: Props) {
   const [opener, setOpener] = useState<HTMLButtonElement>()
   const self = runtime.getSelf().id
   const author = personId(project)
+  const group = runtime.groupFor(project)
   const role = runtime.getCatalog().roles.get(self)
   const edit = role && self === author
   const remove = edit || role === 'admin'
@@ -42,7 +44,8 @@ export function ProjectDetail(props: Props) {
       <p class="lead" lang={locale}>{summary}</p>
       <Tags tags={project.tags} />
       <dl class="project-meta">
-        <div><dt>{t.author}</dt><dd><PersonName did={author} name={runtime.displayNameFor(author)} delegated={author !== project.fromId} /></dd></div>
+        <div><dt>{t.author}</dt><dd><AuthorLink did={author} name={runtime.displayNameFor(author)} /></dd></div>
+        {group && <div><dt>{t.group}</dt><dd><GroupLink group={group} /></dd></div>}
         <div><dt>{t.updated}</dt><dd><DateText at={project.updatedAt} dateOnly /></dd></div>
       </dl>
       <Thumbnail cid={project.thumbnailCid} url={project.thumbnailUrl} projectUrl={project.url} title={title} />

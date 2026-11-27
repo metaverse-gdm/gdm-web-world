@@ -29,3 +29,4 @@ npm-debug.log*
 Thumbs.db
 desktop.ini
 .claude/settings.local.json
+CLAUDE.md

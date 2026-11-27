@@ -3,12 +3,14 @@ import { documentLanguages, LanguageContext, useMessages } from '../i18n'
 import { openProjectFromCatalog } from '../hooks/useHashRoute'
 import { localizedProject } from '../lib/localizedProject'
 import { personId } from '../lib/wires'
+import type { GroupView } from '../lib/catalogStore'
 import type { ProjectRecord } from '../lib/wires'
-import { DateText, ExternalLink, PersonName, Tags } from './common'
+import { AuthorLink, DateText, ExternalLink, Tags } from './common'
+import { GroupLink } from './Groups'
 import { Thumbnail } from './Thumbnail'
 
-export function ProjectCard({ project, displayNameFor, onOpen }: {
-  project: ProjectRecord; displayNameFor(did: string): string | undefined; onOpen(): void
+export function ProjectCard({ project, displayNameFor, group, onOpen }: {
+  project: ProjectRecord; displayNameFor(did: string): string | undefined; group?: GroupView; onOpen(): void
 }) {
   const t = useMessages()
   const { title, summary, lang } = localizedProject(project, useContext(LanguageContext))
@@ -27,7 +29,8 @@ export function ProjectCard({ project, displayNameFor, onOpen }: {
       <p class="work-meta">
         <DateText at={project.updatedAt} dateOnly /><span aria-hidden="true"> · </span>
         <span class="sr-only">{t.author} </span>
-        <PersonName did={author} name={displayNameFor(author)} delegated={author !== project.fromId} />
+        <AuthorLink did={author} name={displayNameFor(author)} />
+        {group && <><span aria-hidden="true"> · </span><span class="sr-only">{t.group} </span><GroupLink group={group} /></>}
       </p>
       <Tags tags={project.tags} />
       <p class="work-description" lang={locale}>{summary}</p>

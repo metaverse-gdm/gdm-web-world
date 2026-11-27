@@ -109,3 +109,57 @@ it('publishes stats for a public viewer and exposes totals after they become an 
   receive()([selfView, await approve(root, app.identity, 'admin', now)], false)
   expect(app.getProjectStats(PROJECT_ID)?.month).toEqual({ impression: 0, detail: 1, click: 0 })
 })
+
+it('creates a group, lets an invitee join and post under it, and enforces ownership', async () => {
+  const [root, friend, stranger] = await identities()
+  ROOT_ADMIN_DIDS.push(root.did)
+  const app = runtime = await createRuntime()
+  await expect(app.saveGroup({ name: 'Circle', members: [] })).rejects.toThrow()
+  const now = Date.now()
+  receive()([
+    await approve(root, app.identity, 'member', now), await approve(root, friend, 'member', now),
+    await approve(root, stranger, 'member', now),
+  ], false)
+  const groupId = await app.saveGroup({ name: ' Circle ', bio: ' Hello ', members: [friend.did, app.identity.did] })
+  const group = app.getCatalog().groups.get(groupId)!
+  expect(group.record).toMatchObject({ name: 'Circle', bio: 'Hello', members: [friend.did], rev: 1 })
+  expect(group).toMatchObject({ owner: app.identity.did, members: [app.identity.did], invited: [friend.did] })
+  await expect(app.setGroupMembership(groupId, false)).rejects.toThrow()
+
+  // The invitee accepts through a record signed by their own leaf.
+  receive()([await makeWire(friend, { type: 'gdmw:group-membership', groupId, joined: true, updatedAt: Date.now() })], false)
+  expect(app.getCatalog().groups.get(groupId)?.members).toEqual([app.identity.did, friend.did])
+
+  const fields = { title: 'Game', summary: 'Fun', description: '', url: 'https://example.com/', tags: [] }
+  const projectId = await app.saveProject({ ...fields, groupId })
+  expect(app.groupFor(app.getCatalog().projects.get(projectId)!)?.record.groupId).toBe(groupId)
+  await expect(app.saveProject({ ...fields, groupId: PROJECT_ID })).rejects.toThrow()
+
+  const strangerGroup = await makeWire(stranger, {
+    type: 'gdmw:group-upsert', groupId: PROJECT_ID, name: 'Other', members: [app.identity.did],
+    createdAt: Date.now(), updatedAt: Date.now(), rev: 1,
+  })
+  receive()([strangerGroup], false)
+  await expect(app.saveGroup({ name: 'Hijack', members: [] }, PROJECT_ID)).rejects.toThrow()
+  await app.setGroupMembership(PROJECT_ID, false)
+  expect(app.getCatalog().groups.get(PROJECT_ID)).toMatchObject({ invited: [], declined: [app.identity.did] })
+  await app.setGroupMembership(PROJECT_ID, true)
+  expect(app.getCatalog().groups.get(PROJECT_ID)?.members).toEqual([stranger.did, app.identity.did])
+
+  await app.deleteGroup(groupId)
+  expect(app.getCatalog().groups.has(groupId)).toBe(false)
+  expect(app.groupFor(app.getCatalog().projects.get(projectId)!)).toBeUndefined()
+})
+
+it('keeps the signed bio when only the display name changes', async () => {
+  const [root] = await identities()
+  ROOT_ADMIN_DIDS.push(root.did)
+  const app = runtime = await createRuntime()
+  receive()([await approve(root, app.identity, 'member', Date.now())], false)
+  await app.saveProfile({ displayName: ' Sakura ', bio: ' About us ' })
+  expect(app.bioFor(app.identity.did)).toBe('About us')
+  await app.saveDisplayName('Sakura Studio')
+  expect(app.getCatalog().profiles.get(app.identity.did)).toMatchObject({ displayName: 'Sakura Studio', bio: 'About us' })
+  await app.saveProfile({ displayName: 'Sakura Studio', bio: '' })
+  expect(app.bioFor(app.identity.did)).toBeUndefined()
+})

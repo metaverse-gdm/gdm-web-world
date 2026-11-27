@@ -1,5 +1,6 @@
 import { useContext, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { ComponentChildren, JSX } from 'preact'
+import { personHref } from '../hooks/useHashRoute'
 import { useMessages } from '../i18n'
 import { Icon } from './Icon'
 import { ToastContext } from './Toast'
@@ -85,16 +86,29 @@ export function PersonName({ did, name, delegated = false }: { did: string; name
   }}>
     <button ref={trigger} type="button" class="person-name-trigger" aria-expanded={open} aria-controls={id}
       aria-label={t.viewDid(name ?? `${did.slice(0, 15)}…${did.slice(-6)}`)}
-      aria-describedby={delegated ? `${id}-mistl` : undefined} onClick={() => {
+      onClick={() => {
         trigger.current?.focus({ preventScroll: true })
         setOpen(!open)
       }}>
       {name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
-      {delegated && <span id={`${id}-mistl`} class="mistl-badge">mistl</span>}
     </button>
     <span ref={popup} id={id} class="person-name-popup" aria-hidden={!open} inert={!open} data-open={open}>
-      <CopyDid did={did} />
+      <CopyDid did={did} delegated={delegated} />
+      <a class="person-page-link" href={personHref(did)} onClick={() => setOpen(false)}>
+        <Icon name="user" />{t.personPage}
+      </a>
     </span>
+  </span>
+}
+
+/** A person's name that opens their page, for places where browsing their work is the likely intent. */
+export function AuthorLink({ did, name }: { did: string; name?: string }) {
+  const t = useMessages()
+  return <span class="person-name">
+    <a class="person-name-trigger author-link" href={personHref(did)}
+      aria-label={t.viewPerson(name ?? `${did.slice(0, 15)}…${did.slice(-6)}`)}>
+      {name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
+    </a>
   </span>
 }
 
@@ -118,9 +132,9 @@ export function ExternalLink({ href, primary = false, children, onOpen }: {
   </a>
 }
 
-export function BackLink({ href = '#/' }: { href?: string }) {
+export function BackLink({ href = '#/', label }: { href?: string; label?: string }) {
   const t = useMessages()
-  return <a class="back-link" href={href}><Icon name="back" />{t.back}</a>
+  return <a class="back-link" href={href}><Icon name="back" />{label ?? t.back}</a>
 }
 
 export function EmptyState({ message, children }: { message: string; children?: ComponentChildren }) {

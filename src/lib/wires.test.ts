@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { signWireWithDelegation } from '@tik-choco/mistai/identity'
 import { GLOBAL_ROOM_ID } from '../config'
-import { signStringWithDidIdentity } from '../crypto/didIdentity'
+import { createDidIdentity, signStringWithDidIdentity } from '../crypto/didIdentity'
 import type { DidIdentity } from '../crypto/didIdentity'
 import { identities, PROJECT_ID, projectFields, upsert } from '../test/fixtures'
 import { CLOCK_SKEW_MS, DAY_MS } from './delegation'
@@ -16,6 +16,98 @@ const chinese = { title: '列车应用', summary: '查看时刻表', description
 beforeAll(async () => {
   [alice, bob] = await identities()
   signed = await upsert(alice)
+})
+
+describe('group wires', () => {
+  const groupId = '190b17ef-7ad2-43e4-b374-351e89cc5c45'
+  const now = 25
+  const groupFields = {
+    type: 'gdmw:group-upsert', groupId, name: 'Train club', createdAt: 20, updatedAt: now, rev: 1,
+  } as const
+
+  async function sign(overrides: Record<string, unknown> = {}) {
+    const fields = {
+      v: 1, roomId: GLOBAL_ROOM_ID, fromId: alice.did, ...groupFields, members: [bob.did], ...overrides,
+    }
+    return signWireWithDelegation(fields, alice)
+  }
+
+  it('round-trips group upserts, deletes and both membership states as catalog records', async () => {
+    const records = await Promise.all([
+      makeWire(alice, { ...groupFields, members: [] }),
+      makeWire(alice, { ...groupFields, bio: 'About the club', members: [bob.did] }),
+      makeWire(alice, { type: 'gdmw:group-delete', groupId, deletedAt: now }),
+      makeWire(bob, { type: 'gdmw:group-membership', groupId, joined: true, updatedAt: now }),
+      makeWire(bob, { type: 'gdmw:group-membership', groupId, joined: false, updatedAt: now }),
+    ])
+    for (const record of records) {
+      const parsed = readRecord(JSON.parse(JSON.stringify(record)), now)
+      expect(parsed).toEqual(record)
+      expect(parsed && isCatalog(parsed)).toBe(true)
+    }
+  })
+
+  it.each([
+    { name: '' }, { name: ' ' }, { name: ' Club' }, { name: 'Club ' },
+    { name: 'a'.repeat(LIMITS.groupName + 1) },
+    { bio: '' }, { bio: ' About' }, { bio: 'About ' }, { bio: 'a'.repeat(LIMITS.bio + 1) }, { bio: 1 },
+    { members: ['not-a-did'] }, { members: 'not-an-array' },
+    { groupId: 'abc' }, { groupId: '190b17ef-7ad2-13e4-b374-351e89cc5c45' },
+    { createdAt: 0 }, { updatedAt: 19 }, { rev: 0 }, { rev: 1.5 },
+  ])('rejects a correctly signed invalid group upsert (%o)', async overrides => {
+    expect(readRecord(await sign(overrides), now)).toBeUndefined()
+  })
+
+  it('rejects duplicate member DIDs even when they are valid DIDs', async () => {
+    expect(readRecord(await sign({ members: [bob.did, bob.did] }), now)).toBeUndefined()
+  })
+
+  it('accepts fields at their limits and rejects one too many distinct members', async () => {
+    const extra = await Promise.all(Array.from({ length: LIMITS.groupMembers - 1 }, () => createDidIdentity()))
+    const members = [alice.did, bob.did, ...extra.map(identity => identity.did)]
+    const atLimit = {
+      name: 'a'.repeat(LIMITS.groupName), bio: 'b'.repeat(LIMITS.bio), members: members.slice(0, LIMITS.groupMembers),
+    }
+    const valid = await sign(atLimit)
+    expect(readRecord(valid, now)).toEqual(valid)
+    expect(readRecord(await sign({ ...atLimit, members }), now)).toBeUndefined()
+  })
+
+  it.each([
+    { type: 'gdmw:group-delete', groupId: 'invalid', deletedAt: now },
+    { type: 'gdmw:group-delete', groupId, deletedAt: 0 },
+    { type: 'gdmw:group-membership', groupId: 'invalid', joined: true, updatedAt: now },
+    { type: 'gdmw:group-membership', groupId, joined: 'true', updatedAt: now },
+    { type: 'gdmw:group-membership', groupId, joined: 1, updatedAt: now },
+    { type: 'gdmw:group-membership', groupId, joined: true, updatedAt: 0 },
+  ])('rejects a correctly signed invalid group delete or membership (%o)', async payload => {
+    const fields = { v: 1, roomId: GLOBAL_ROOM_ID, fromId: alice.did, ...payload }
+    expect(readRecord(await signWireWithDelegation(fields, alice), now)).toBeUndefined()
+  })
+
+  it('enforces the future clock-skew limit for each group record type', async () => {
+    const at = now + CLOCK_SKEW_MS
+    const records = await Promise.all([
+      makeWire(alice, { ...groupFields, members: [], updatedAt: at }),
+      makeWire(alice, { type: 'gdmw:group-delete', groupId, deletedAt: at }),
+      makeWire(bob, { type: 'gdmw:group-membership', groupId, joined: true, updatedAt: at }),
+    ])
+    for (const record of records) {
+      expect(readRecord(record, now)).toEqual(record)
+      expect(readRecord(record, now - 1)).toBeUndefined()
+    }
+  })
+
+  it('round-trips a project with a valid optional groupId', async () => {
+    const project = await upsert(alice, { groupId })
+    expect(project.groupId).toBe(groupId)
+    expect(readRecord(JSON.parse(JSON.stringify(project)), now)).toEqual(project)
+  })
+
+  it.each(['abc', '', '190b17ef-7ad2-13e4-b374-351e89cc5c45'])('rejects a signed project with an invalid groupId (%s)', async invalidId => {
+    const fields = { ...signed, groupId: invalidId }
+    expect(readRecord(await signWireWithDelegation(fields, alice), now)).toBeUndefined()
+  })
 })
 
 describe('stats wires', () => {
@@ -91,10 +183,16 @@ describe('wire validation and signatures', () => {
     expect(parsed && isCatalog(parsed)).toBe(true)
     expect(readRecord({ ...profile, displayName: 'Changed' })).toBeUndefined()
   })
+  it('verifies a signed profile with a self-introduction', async () => {
+    const profile = await makeWire(alice, { type: 'gdmw:profile', displayName: 'Circle', bio: '**ゲーム**サークル', updatedAt: 25 })
+    expect(readRecord(JSON.parse(JSON.stringify(profile)))).toEqual(profile)
+    expect(readRecord({ ...profile, bio: 'Changed' })).toBeUndefined()
+  })
   it.each([
     { displayName: '' }, { displayName: ' ' }, { displayName: ' Name' }, { displayName: 'Name ' },
     { displayName: 'a'.repeat(LIMITS.displayName + 1) }, { updatedAt: 0 }, { updatedAt: 1.5 },
     { updatedAt: 25 + CLOCK_SKEW_MS + 1 }, { subject: 'elsewhere' },
+    { bio: '' }, { bio: ' About' }, { bio: 'a'.repeat(LIMITS.bio + 1) }, { bio: 1 },
   ])('rejects an invalid profile even when correctly signed (%o)', async update => {
     const fields = {
       v: 1, roomId: GLOBAL_ROOM_ID, fromId: alice.did,

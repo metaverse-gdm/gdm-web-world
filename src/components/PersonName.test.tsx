@@ -24,7 +24,8 @@ it('reveals the full DID, copies it and restores focus on Escape', async () => {
   </ToastContext.Provider></LanguageContext.Provider>, host))
   const trigger = host.querySelector<HTMLButtonElement>('.person-name-trigger')!
   const popup = document.getElementById(trigger.getAttribute('aria-controls')!)!
-  expect(trigger.textContent).toBe('Team Sakuramistl')
+  expect(trigger.textContent).toBe('Team Sakura')
+  expect(popup.querySelector('.mistl-badge')?.textContent).toBe('mistl')
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
   expect(popup.hasAttribute('inert')).toBe(true)
 
