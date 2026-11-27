@@ -1,4 +1,4 @@
-import { useContext, useState } from 'preact/hooks'
+import { useContext, useEffect, useState } from 'preact/hooks'
 import { ScopeVaultPanel } from '@tik-choco/mistvault/preact'
 import type { VaultLocale } from '@tik-choco/mistvault'
 import type { Runtime } from '../lib/runtime'
@@ -14,6 +14,22 @@ import { MistlPairing } from './MistlPairing'
 let revealAdvanced = false
 /** Opens the advanced section on the next settings visit (e.g. from the approval prompt). */
 export const showAdvancedSettings = () => { revealAdvanced = true }
+let revealAi = false
+export const showAiSettings = () => { revealAi = true }
+
+function LazyAiSettings() {
+  const t = useMessages()
+  const [Panel, setPanel] = useState<typeof import('./AiSettings').AiSettings>()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let active = true
+    void import('./AiSettings').then(module => {
+      if (active) setPanel(() => module.AiSettings)
+    }).catch(() => { if (active) setFailed(true) })
+    return () => { active = false }
+  }, [])
+  return Panel ? <Panel /> : failed ? <ErrorText message={t.aiRequestFailed} /> : <p role="status" class="muted">{t.loading}</p>
+}
 
 const vaultLocales: Record<Language, VaultLocale> = { ja: 'ja', en: 'en', zh: 'zh-CN' }
 
@@ -27,6 +43,11 @@ export function SettingsPage({ runtime }: { runtime: Runtime }) {
   const [advancedOpen] = useState(() => {
     const open = revealAdvanced || !!runtime.getSelf().expiresSoon
     revealAdvanced = false
+    return open
+  })
+  const [aiOpen, setAiOpen] = useState(() => {
+    const open = revealAi
+    revealAi = false
     return open
   })
   return <section class="screen-stack content-width" aria-label={t.settings}>
@@ -48,6 +69,10 @@ export function SettingsPage({ runtime }: { runtime: Runtime }) {
       </label>
       <ErrorText message={action.error} />
     </section>
+    <details class="advanced-settings" open={aiOpen} onToggle={event => setAiOpen(event.currentTarget.open)}>
+      <summary>{t.aiSettings}<Icon name="chevron" /></summary>
+      <div class="advanced-body">{aiOpen && <LazyAiSettings />}</div>
+    </details>
     <details class="advanced-settings" open={advancedOpen}>
       <summary>{t.advancedSettings}<Icon name="chevron" /></summary>
       <div class="advanced-body"><div class="screen-stack">

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useLayoutEffect, useState } from 'preact/hooks'
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { documentLanguages, LanguageContext, languageNames, languages, useMessages } from '../i18n'
 import type { Language } from '../i18n'
 import type { Runtime } from '../lib/runtime'
@@ -8,9 +8,10 @@ import { saveThumbnail } from '../lib/thumbnails'
 import { isHttpsUrl, isHttpUrl, LIMITS } from '../lib/wires'
 import type { ProjectRecord, ProjectText } from '../lib/wires'
 import { useAction } from '../hooks/useAction'
+import { aiConfigured, subscribeAiSettings } from '../lib/ai/settings'
 import { BackLink, CopyDid, ErrorText } from './common'
 import { FilePicker } from './FilePicker'
-import { showAdvancedSettings } from './Settings'
+import { showAdvancedSettings, showAiSettings } from './Settings'
 import { mergeTags, TagInput } from './TagInput'
 import { Thumbnail } from './Thumbnail'
 import { ToastContext } from './Toast'
@@ -57,6 +58,7 @@ const emptyText: ProjectText = { title: '', summary: '', description: '' }
 const textFor = (draft: Draft, primary: Language, language: Language): ProjectText =>
   language === primary ? draft : draft.translations?.[language] ?? emptyText
 const hasText = ({ title, summary, description }: ProjectText) => !!(title.trim() || summary.trim() || description.trim())
+const sameText = (a: ProjectText, b: ProjectText) => a.title === b.title && a.summary === b.summary && a.description === b.description
 type TextIssue = { language: Language; field: 'title' | 'summary' }
 
 export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: ProjectRecord }) {
@@ -74,6 +76,9 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   const [pendingTag, setPendingTag] = useState('')
   const form = useAction()
   const upload = useAction()
+  const translation = useAction()
+  const [needsAiSettings, setNeedsAiSettings] = useState(false)
+  const mounted = useRef(true)
   const [picked, setPicked] = useState<{ cid: string; name: string }>()
   const [invalidImageUrl, setInvalidImageUrl] = useState(false)
   const [failedImageUrl, setFailedImageUrl] = useState<string>()
@@ -86,6 +91,16 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   const tabId = (language: Language) => `${ids}-tab-${language}`
   const panelId = (language: Language) => `${ids}-panel-${language}`
   const imageInputId = ids + '-image'
+  const canTranslate = !!draft.title.trim()
+  const emptyLanguages = languages.filter(language => language !== primary && !hasText(textFor(draft, primary, language)))
+
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  useEffect(() => subscribeAiSettings(() => {
+    if (aiConfigured()) setNeedsAiSettings(false)
+  }), [])
 
   useEffect(() => {
     if (!autoUrl) return
@@ -106,6 +121,40 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
     if (issue?.language === tab && issue.field === field) setIssue(undefined)
   }
 
+  function translateTargets(targets: Language[], bulk: boolean) {
+    if (translation.busy || form.busy || upload.busy) return
+    void translation.run(async () => {
+      if (!aiConfigured()) {
+        setNeedsAiSettings(true)
+        return
+      }
+      setNeedsAiSettings(false)
+      const { title, summary, description } = load()
+      const source = { title, summary, description }
+      if (!source.title.trim()) return
+      for (const target of targets) {
+        if (!mounted.current) return
+        const before = textFor(load(), primary, target)
+        if (hasText(before) && (bulk || !window.confirm(t.aiTranslateOverwrite(languageNames[target])))) continue
+        const { translateProjectText } = await import('../lib/ai/translate')
+        const translated = await translateProjectText(source, primary, target)
+        if (!mounted.current) return
+        const latest = load()
+        if (latest.lang && latest.lang !== primary) throw new Error(t.aiTranslationChanged)
+        const current = textFor(latest, primary, target)
+        // Bulk never overwrites a nonempty tab, even if it was filled while
+        // awaiting the provider. Single-tab confirmation covers only the text
+        // that was present when the request was sent.
+        if (bulk && hasText(current)) continue
+        if (!sameText(before, current)) throw new Error(t.aiTranslationChanged)
+        runtime.preferences.setDraft(slot, {
+          ...latest, lang: primary, translations: { ...latest.translations, [target]: translated },
+        })
+        setIssue(previous => previous?.language === target && translated[previous.field].trim() ? undefined : previous)
+      }
+    })
+  }
+
   const currentText = textFor(draft, primary, tab)
   const textIssueId = ids + '-text-error'
   const imageErrorId = ids + '-image-error'
@@ -115,8 +164,9 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
 
   return <section class="content-width">
     <BackLink href={project ? `#/p/${project.projectId}` : '#/'} />
-    <ValidatedForm class="panel form-stack" aria-label={project ? t.edit : t.newProject} aria-busy={form.busy || upload.busy} onSubmit={event => {
+    <ValidatedForm class="panel form-stack" aria-label={project ? t.edit : t.newProject} aria-busy={form.busy || upload.busy || translation.busy} onSubmit={event => {
       event.preventDefault()
+      if (translation.busy) return
       const value = load()
       const filled = [primary, ...languages.filter(language => language !== primary)].flatMap(language => {
         const { title, summary, description } = textFor(value, primary, language)
@@ -151,23 +201,33 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
     }}>
       <fieldset disabled={form.busy || upload.busy} class="form-stack">
         <div class="post-languages">
-          <div class="post-tabs" role="tablist" aria-label={t.postLanguages}>
-            {languages.map((language, index) => <button type="button" role="tab" key={language} id={tabId(language)}
-              lang={documentLanguages[language]} aria-controls={panelId(language)} aria-selected={tab === language}
-              tabIndex={tab === language ? 0 : -1} data-filled={hasText(textFor(draft, primary, language))}
-              onClick={() => setTab(language)} onKeyDown={event => {
-                const next = event.key === 'ArrowLeft' ? (index + languages.length - 1) % languages.length
-                  : event.key === 'ArrowRight' ? (index + 1) % languages.length
-                    : event.key === 'Home' ? 0 : event.key === 'End' ? languages.length - 1 : undefined
-                if (next === undefined) return
-                event.preventDefault()
-                setTab(languages[next])
-                document.getElementById(tabId(languages[next]))?.focus()
-              }}>{languageNames[language]}</button>)}
+          <div class="row-between">
+            <div class="post-tabs" role="tablist" aria-label={t.postLanguages}>
+              {languages.map((language, index) => <button type="button" role="tab" key={language} id={tabId(language)}
+                lang={documentLanguages[language]} aria-controls={panelId(language)} aria-selected={tab === language}
+                tabIndex={tab === language ? 0 : -1} data-filled={hasText(textFor(draft, primary, language))}
+                onClick={() => setTab(language)} onKeyDown={event => {
+                  const next = event.key === 'ArrowLeft' ? (index + languages.length - 1) % languages.length
+                    : event.key === 'ArrowRight' ? (index + 1) % languages.length
+                      : event.key === 'Home' ? 0 : event.key === 'End' ? languages.length - 1 : undefined
+                  if (next === undefined) return
+                  event.preventDefault()
+                  setTab(languages[next])
+                  document.getElementById(tabId(languages[next]))?.focus()
+                }}>{languageNames[language]}</button>)}
+            </div>
+            {canTranslate && <button type="button" disabled={translation.busy || !emptyLanguages.length}
+              onClick={() => translateTargets(emptyLanguages, true)}>{t.aiTranslateEmpty}</button>}
           </div>
+          {canTranslate && <p class="muted">{t.aiReview}</p>}
+          {translation.busy && <p role="status" class="muted">{t.aiTranslating}</p>}
+          {needsAiSettings && <p class="muted" role="status">{t.aiNotConfigured} <a href="#/settings" onClick={showAiSettings}>{t.aiOpenSettings}</a></p>}
+          <ErrorText message={translation.error} />
           {languages.map(language => <div key={language} role="tabpanel" id={panelId(language)}
             aria-labelledby={tabId(language)} hidden={language !== tab}>
             {language === tab && <div class="form-stack post-language-fields">
+              {language !== primary && canTranslate && <div><button type="button" disabled={translation.busy}
+                onClick={() => translateTargets([language], false)}>{t.aiTranslateFrom(languageNames[primary])}</button></div>}
               {issue?.language === tab && <p id={textIssueId} class="error" role="alert">{t.missingPostField(languageNames[tab], t[issue.field])}</p>}
               <label>{t.title}<input id={panelId(tab) + '-title'} lang={documentLanguages[tab]} maxLength={LIMITS.title}
                 aria-invalid={issue?.language === tab && issue.field === 'title' || undefined}
@@ -225,7 +285,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
       </fieldset>
       {upload.busy && <p role="status">{t.savingImage}</p>}
       <ErrorText message={form.error || upload.error} />
-      <div class="actions"><button type="submit" class="primary" disabled={form.busy || upload.busy}>{project ? t.saveChanges : t.publish}</button></div>
+      <div class="actions"><button type="submit" class="primary" disabled={form.busy || upload.busy || translation.busy}>{project ? t.saveChanges : t.publish}</button></div>
     </ValidatedForm>
   </section>
 }

@@ -3,17 +3,22 @@ import { useEffect, useState } from 'preact/hooks'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { LanguageContext } from '../i18n'
+import { emptyLlmConfig, saveLlmConfig } from '@tik-choco/mistai/llm-config'
 import { createLocalPreferences, emptyDraft } from '../lib/localPreferences'
 import type { Runtime } from '../lib/runtime'
 import { PROJECT_ID } from '../test/fixtures'
 import { ProjectForm } from './ProjectForm'
+import { translateProjectText } from '../lib/ai/translate'
+
+vi.mock('../lib/ai/translate', () => ({ translateProjectText: vi.fn() }))
 
 let host: HTMLDivElement
 beforeEach(() => {
   localStorage.clear()
+  vi.mocked(translateProjectText).mockReset()
   host = document.body.appendChild(document.createElement('div'))
 })
-afterEach(() => { act(() => render(null, host)); host.remove() })
+afterEach(() => { act(() => render(null, host)); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function setup() {
   const preferences = createLocalPreferences()
@@ -40,6 +45,83 @@ const activePanel = '[role="tabpanel"]:not([hidden])'
 const tab = (lang: string) => host.querySelector<HTMLButtonElement>(`[role="tab"][lang="${lang}"]`)!
 const submit = () => act(async () => {
   host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }))
+})
+
+function configureAi() {
+  const config = emptyLlmConfig()
+  config.providers.push({ id: 'api', label: 'API', apiKey: '', baseUrl: 'https://example.com/v1' })
+  config.defaultModel = { providerId: 'api', model: 'translator' }
+  saveLlmConfig(config)
+}
+
+const button = (label: string) => [...host.querySelectorAll('button')].find(element => element.textContent === label)!
+const translated = { title: '中文标题', summary: '中文概要', description: '# 说明' }
+
+it('fills the selected target tab as a draft and keeps the primary language', async () => {
+  configureAi()
+  const { preferences, saveProject } = setup()
+  vi.mocked(translateProjectText).mockResolvedValue(translated)
+  type(activePanel + ' input', 'English title')
+  type(activePanel + ' textarea', 'English summary')
+  act(() => tab('zh-Hans').click())
+  await act(async () => { button('AI translate from English').click(); await vi.dynamicImportSettled() })
+  expect(translateProjectText).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'English title' }), 'en', 'zh')
+  expect(preferences.get().drafts.new.value).toMatchObject({ lang: 'en', title: 'English title', translations: { zh: translated } })
+  expect(host.querySelector<HTMLInputElement>(activePanel + ' input')?.value).toBe(translated.title)
+  expect(saveProject).not.toHaveBeenCalled()
+})
+
+it('offers a settings link when no model is configured', async () => {
+  setup()
+  type(activePanel + ' input', 'English title')
+  act(() => tab('zh-Hans').click())
+  await act(async () => { button('AI translate from English').click() })
+  expect(host.querySelector('a[href="#/settings"]')?.textContent).toBe('Open AI translation settings')
+  expect(translateProjectText).not.toHaveBeenCalled()
+})
+
+it('bulk translates only empty tabs and preserves edits made during the request', async () => {
+  configureAi()
+  const { preferences } = setup()
+  act(() => preferences.setDraft('new', { ...emptyDraft(), lang: 'en', title: 'Title', summary: 'Summary', translations: { ja: { title: '日本語', summary: '', description: '' } } }))
+  let complete!: (value: typeof translated) => void
+  vi.mocked(translateProjectText).mockReturnValue(new Promise(resolve => { complete = resolve }))
+  act(() => button('AI translate empty languages').click())
+  await vi.waitFor(() => expect(translateProjectText).toHaveBeenCalledTimes(1))
+  expect(button('AI translate empty languages').disabled).toBe(true)
+  expect(host.querySelector('[role="status"]')?.textContent).toContain('Translating')
+  type('input[type="url"]', 'https://project.example')
+  await act(async () => { complete(translated) })
+  expect(preferences.get().drafts.new.value).toMatchObject({ url: 'https://project.example', translations: { ja: { title: '日本語' }, zh: translated } })
+})
+
+it('asks before overwriting existing translations and respects cancellation', async () => {
+  configureAi()
+  const { preferences } = setup()
+  act(() => preferences.setDraft('new', { ...emptyDraft(), lang: 'en', title: 'Title', translations: { zh: translated } }))
+  act(() => tab('zh-Hans').click())
+  const confirm = vi.fn(() => false)
+  vi.stubGlobal('confirm', confirm)
+  await act(async () => { button('AI translate from English').click() })
+  expect(confirm).toHaveBeenCalledOnce()
+  expect(translateProjectText).not.toHaveBeenCalled()
+  expect(preferences.get().drafts.new.value?.translations?.zh).toEqual(translated)
+})
+
+it('translates empty languages sequentially and skips a tab filled during translation', async () => {
+  configureAi()
+  const { preferences } = setup()
+  act(() => preferences.setDraft('new', { ...emptyDraft(), lang: 'en', title: 'Title', summary: 'Summary' }))
+  let complete!: (value: typeof translated) => void
+  vi.mocked(translateProjectText).mockReturnValueOnce(new Promise(resolve => { complete = resolve })).mockResolvedValue(translated)
+  act(() => button('AI translate empty languages').click())
+  await vi.waitFor(() => expect(translateProjectText).toHaveBeenCalledTimes(1))
+  expect(translateProjectText).toHaveBeenCalledWith(expect.anything(), 'en', 'ja')
+  act(() => tab('zh-Hans').click())
+  type(activePanel + ' input', '手动输入')
+  await act(async () => { complete({ title: '日本語', summary: '概要', description: '' }) })
+  expect(translateProjectText).toHaveBeenCalledTimes(1)
+  expect(preferences.get().drafts.new.value?.translations).toMatchObject({ ja: { title: '日本語' }, zh: { title: '手动输入' } })
 })
 
 it('opens the incomplete language and publishes the translations and pending tag once complete', async () => {
