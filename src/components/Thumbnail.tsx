@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useMessages } from '../i18n'
 import { resolvePreviewImage, resolveScreenshot } from '../lib/linkPreview'
-import { loadThumbnail } from '../lib/thumbnails'
+import { loadMediaImage, loadThumbnail } from '../lib/thumbnails'
 
-type Props = { cid?: string; url?: string; projectUrl?: string; title?: string; decorative?: boolean; onError?: () => void }
+type Props = { cid?: string; url?: string; projectUrl?: string; title?: string; decorative?: boolean; onError?: () => void; mediaImage?: boolean }
 
-export function Thumbnail({ cid, url, projectUrl, title, decorative, onError }: Props) {
+export function Thumbnail({ cid, url, projectUrl, title, decorative, onError, mediaImage }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const auto = !cid && !url ? projectUrl : undefined
   const source = cid ?? url ?? auto
@@ -26,13 +26,13 @@ export function Thumbnail({ cid, url, projectUrl, title, decorative, onError }: 
   }, [cid, source, visible])
 
   return <div ref={host} class="thumbnail" aria-hidden={decorative || undefined}>
-    <ThumbnailImage key={visible ? source : undefined} cid={visible ? cid : undefined}
+    <ThumbnailImage key={visible ? `${source}:${!!mediaImage}` : undefined} cid={visible ? cid : undefined}
       url={visible ? url : undefined} projectUrl={visible ? auto : undefined}
-      title={title} decorative={decorative} onError={onError} />
+      title={title} decorative={decorative} onError={onError} mediaImage={mediaImage} />
   </div>
 }
 
-function ThumbnailImage({ cid, url, projectUrl, title = '', decorative, onError }: Props) {
+function ThumbnailImage({ cid, url, projectUrl, title = '', decorative, onError, mediaImage }: Props) {
   const t = useMessages()
   const [blob, setBlob] = useState<string>()
   const [preview, setPreview] = useState<string | null>()
@@ -47,7 +47,7 @@ function ThumbnailImage({ cid, url, projectUrl, title = '', decorative, onError 
     let retry: ReturnType<typeof setTimeout>
     async function fetchImage(id: string, attempt: number) {
       try {
-        const next = await loadThumbnail(id)
+        const next = await (mediaImage ? loadMediaImage(id) : loadThumbnail(id))
         if (!active) { URL.revokeObjectURL(next); return }
         url = next
         setBlob(url)
@@ -61,7 +61,7 @@ function ThumbnailImage({ cid, url, projectUrl, title = '', decorative, onError 
       clearTimeout(retry)
       if (url) URL.revokeObjectURL(url)
     }
-  }, [cid])
+  }, [cid, mediaImage])
   useEffect(() => {
     if (!projectUrl) return
     let active = true

@@ -2,7 +2,10 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { screenshotUrl } from '../lib/linkPreview'
+import { loadMediaImage, loadThumbnail } from '../lib/thumbnails'
 import { Thumbnail } from './Thumbnail'
+
+vi.mock('../lib/thumbnails', () => ({ loadMediaImage: vi.fn(), loadThumbnail: vi.fn() }))
 
 let host: HTMLDivElement
 let show: () => void
@@ -20,6 +23,8 @@ afterEach(() => {
   act(() => render(null, host))
   host.remove()
   vi.unstubAllGlobals()
+  vi.resetAllMocks()
+  vi.restoreAllMocks()
 })
 
 it('uses a direct URL with lazy loading and falls back to the initial on error', () => {
@@ -60,4 +65,18 @@ it('resolves visible project URLs and tries mshots after an Open Graph image err
   act(() => { screenshot.dispatchEvent(new Event('error')) })
   expect(host.querySelector('img')).toBeNull()
   expect(host.querySelector('.image-fallback')?.textContent).toBe('G')
+})
+
+it('loads a gallery-derived card cover using the larger media image limit', async () => {
+  const cid = 'a'.repeat(32)
+  vi.mocked(loadMediaImage).mockResolvedValue('blob:media-cover')
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  act(() => render(<Thumbnail cid={cid} mediaImage title="Game" decorative />, host))
+  expect(loadMediaImage).not.toHaveBeenCalled()
+  act(show)
+  await vi.waitFor(() => expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:media-cover'))
+  expect(loadMediaImage).toHaveBeenCalledExactlyOnceWith(cid)
+  expect(loadThumbnail).not.toHaveBeenCalled()
+  act(() => render(null, host))
+  expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:media-cover')
 })

@@ -12,16 +12,24 @@ export const LIMITS = {
   title: 100, summary: 240, description: 4000, url: 512, tags: 8, tag: 24,
   // Leave room for mistlib's framing within its 64 KiB transport limit.
   displayName: 48, bio: 1000, request: 600, note: 240, wireBytes: 63 * 1024, recordBytes: 56 * 1024, syncKeys: 128, syncRecords: 64,
-  statsProjects: 200, statsBytes: 10 * 1024, groupName: 48, groupMembers: 50,
+  statsProjects: 200, statsBytes: 10 * 1024, groupName: 48, groupMembers: 50, media: 12,
 } as const
 export const REQUEST_INTERVAL_MS = 60_000
 export type Role = 'member' | 'admin'
 export type VaultConfig = { mode: 'off' | 'auto' | 'custom'; room: string; rev: number; by: string }
 
 export type ProjectText = { title: string; summary: string; description: string }
+/**
+ * One gallery entry: an uploaded image blob (with an optional small `thumb` blob
+ * for cards and filmstrips), or an https image / video file / video page URL.
+ * The first entry is the project's cover.
+ */
+export type MediaItem = { cid: string; thumb?: string } | { url: string }
 export type ProjectFields = ProjectText & {
   lang?: Language; translations?: Partial<Record<Language, ProjectText>>
   url: string; repoUrl?: string; tags: string[]; thumbnailCid?: string; thumbnailUrl?: string
+  /** Gallery shown on the detail view, in order. Omitted rather than empty. */
+  media?: MediaItem[]
   /** Shown under the group only while the author is one of its current members. */
   groupId?: string
 }
@@ -116,7 +124,19 @@ export function validProjectLanguages({ lang, translations }: Record<string, unk
     && hasOnly(text, ['title', 'summary', 'description']) && validProjectText(text, draft))
 }
 
-const projectKeys = ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'groupId']
+export function validMediaItem(value: unknown, draft = false): value is MediaItem {
+  if (!isObject(value)) return false
+  if ('cid' in value) return hasOnly(value, ['cid', 'thumb']) && validCid(value.cid)
+    && (value.thumb === undefined || validCid(value.thumb))
+  return hasOnly(value, ['url']) && (draft ? bounded(value.url, LIMITS.url) : isHttpsUrl(value.url))
+}
+
+export function validMediaList(value: unknown, draft = false): value is MediaItem[] {
+  return Array.isArray(value) && value.length <= LIMITS.media && (draft || value.length > 0)
+    && value.every(item => validMediaItem(item, draft))
+}
+
+const projectKeys = ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'media', 'groupId']
 export function validProjectFields(value: Record<string, unknown>): boolean {
   return validProjectText(value, false) && validProjectLanguages(value) && isHttpUrl(value.url)
     && (value.repoUrl === undefined || isHttpUrl(value.repoUrl))
@@ -125,6 +145,7 @@ export function validProjectFields(value: Record<string, unknown>): boolean {
     && new Set(value.tags).size === value.tags.length
     && (value.thumbnailCid === undefined || validCid(value.thumbnailCid))
     && (value.thumbnailUrl === undefined || value.thumbnailCid === undefined && isHttpsUrl(value.thumbnailUrl))
+    && (value.media === undefined || validMediaList(value.media))
     && (value.groupId === undefined || validId(value.groupId))
 }
 

@@ -102,13 +102,14 @@ export function PersonName({ did, name, delegated = false }: { did: string; name
 }
 
 /** A person's name that opens their page, for places where browsing their work is the likely intent. */
-export function AuthorLink({ did, name }: { did: string; name?: string }) {
+export function AuthorLink({ did, name, link = true }: { did: string; name?: string; link?: boolean }) {
   const t = useMessages()
+  const Element = link ? 'a' : 'span'
   return <span class="person-name">
-    <a class="person-name-trigger author-link" href={personHref(did)}
-      aria-label={t.viewPerson(name ?? `${did.slice(0, 15)}…${did.slice(-6)}`)}>
+    <Element class="person-name-trigger author-link" href={link ? personHref(did) : undefined}
+      aria-label={link ? t.viewPerson(name ?? `${did.slice(0, 15)}…${did.slice(-6)}`) : undefined}>
       {name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
-    </a>
+    </Element>
   </span>
 }
 

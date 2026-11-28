@@ -4,17 +4,17 @@ import type { Language } from '../i18n'
 import type { Runtime } from '../lib/runtime'
 import { emptyDraft } from '../lib/localPreferences'
 import type { Draft } from '../lib/localPreferences'
-import { saveThumbnail } from '../lib/thumbnails'
-import { isHttpsUrl, isHttpUrl, LIMITS } from '../lib/wires'
+import { draftToFields, foldLegacyCover } from '../lib/draftMedia'
+import { isHttpUrl, LIMITS } from '../lib/wires'
 import type { ProjectRecord, ProjectText } from '../lib/wires'
 import { useAction } from '../hooks/useAction'
 import { aiConfigured, subscribeAiSettings } from '../lib/ai/settings'
 import { BackLink, CopyDid, ErrorText } from './common'
-import { FilePicker } from './FilePicker'
+import { MediaEditor } from './MediaEditor'
+import { ProjectPreviewDialog } from './ProjectPreview'
 import { showAdvancedSettings, showAiSettings } from './Settings'
 import { Select } from './Select'
 import { mergeTags, TagInput } from './TagInput'
-import { Thumbnail } from './Thumbnail'
 import { ToastContext } from './Toast'
 import { ValidatedForm } from './ValidatedForm'
 
@@ -51,8 +51,8 @@ export function ApprovalPrompt({ runtime }: { runtime: Runtime }) {
 }
 
 function fromProject(project: ProjectRecord): Draft {
-  const { title, summary, description, lang, translations, url, repoUrl, tags, thumbnailCid, thumbnailUrl, groupId } = project
-  return { title, summary, description, lang, translations, url, repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl, groupId }
+  const { title, summary, description, lang, translations, url, repoUrl, tags, thumbnailCid, thumbnailUrl, media, groupId } = project
+  return foldLegacyCover({ title, summary, description, lang, translations, url, repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl, media, groupId })
 }
 
 const emptyText: ProjectText = { title: '', summary: '', description: '' }
@@ -68,7 +68,8 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   const ids = useId()
   const slot = project?.projectId ?? 'new'
   const baseline = project ? fromProject(project) : emptyDraft()
-  const load = () => runtime.preferences.get().drafts[slot]?.value ?? baseline
+  const stored = runtime.preferences.get().drafts[slot]?.value
+  const load = () => foldLegacyCover(runtime.preferences.get().drafts[slot]?.value ?? baseline)
   const draft = load()
   const [defaultLanguage] = useState(uiLanguage)
   const primary = draft.lang ?? [defaultLanguage, ...languages].find(language => !draft.translations?.[language]) ?? defaultLanguage
@@ -76,22 +77,17 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   const [issue, setIssue] = useState<TextIssue>()
   const [pendingTag, setPendingTag] = useState('')
   const form = useAction()
-  const upload = useAction()
+  const [mediaBusy, setMediaBusy] = useState(false)
   const translation = useAction()
   const [needsAiSettings, setNeedsAiSettings] = useState(false)
   const mounted = useRef(true)
-  const [picked, setPicked] = useState<{ cid: string; name: string }>()
-  const [invalidImageUrl, setInvalidImageUrl] = useState(false)
-  const [failedImageUrl, setFailedImageUrl] = useState<string>()
   const [autoPreview, setAutoPreview] = useState<string>()
+  const [previewing, setPreviewing] = useState(false)
   const update = (fields: Partial<Draft>) => runtime.preferences.setDraft(slot, { ...load(), ...fields })
-  const sourceUrl = draft.thumbnailUrl?.trim()
-  const imageUrl = isHttpsUrl(sourceUrl) ? sourceUrl : undefined
   const projectUrl = draft.url.trim()
-  const autoUrl = !draft.thumbnailCid && !sourceUrl && isHttpUrl(projectUrl) ? projectUrl : undefined
+  const autoUrl = !draft.media?.length && isHttpUrl(projectUrl) ? projectUrl : undefined
   const tabId = (language: Language) => `${ids}-tab-${language}`
   const panelId = (language: Language) => `${ids}-panel-${language}`
-  const imageInputId = ids + '-image'
   const canTranslate = !!draft.title.trim()
   const self = runtime.getSelf().id
   const myGroups = [...runtime.getCatalog().groups.values()].filter(group => group.members.includes(self))
@@ -106,6 +102,13 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   useEffect(() => subscribeAiSettings(() => {
     if (aiConfigured()) setNeedsAiSettings(false)
   }), [])
+
+  useEffect(() => {
+    if (stored && ('thumbnailCid' in stored || 'thumbnailUrl' in stored)) {
+      const latest = runtime.preferences.get().drafts[slot]?.value
+      if (latest === stored) runtime.preferences.setDraft(slot, foldLegacyCover(stored))
+    }
+  }, [runtime, slot, stored])
 
   useEffect(() => {
     if (!autoUrl) return
@@ -127,7 +130,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
   }
 
   function translateTargets(targets: Language[], bulk: boolean) {
-    if (translation.busy || form.busy || upload.busy) return
+    if (translation.busy || form.busy || mediaBusy) return
     void translation.run(async () => {
       if (!aiConfigured()) {
         setNeedsAiSettings(true)
@@ -162,50 +165,34 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
 
   const currentText = textFor(draft, primary, tab)
   const textIssueId = ids + '-text-error'
-  const imageErrorId = ids + '-image-error'
-  const badImage = invalidImageUrl && !!sourceUrl && !imageUrl
-  const failedImage = !!imageUrl && failedImageUrl === imageUrl
   const automatic = autoUrl && autoPreview === autoUrl ? autoPreview : undefined
 
   return <section class="content-width">
     <BackLink href={project ? `#/p/${project.projectId}` : '#/'} />
-    <ValidatedForm class="panel form-stack" aria-label={project ? t.edit : t.newProject} aria-busy={form.busy || upload.busy || translation.busy} onSubmit={event => {
+    <ValidatedForm class="panel form-stack" aria-label={project ? t.edit : t.newProject} aria-busy={form.busy || mediaBusy || translation.busy} onSubmit={event => {
       event.preventDefault()
-      if (translation.busy) return
-      const value = load()
-      const filled = [primary, ...languages.filter(language => language !== primary)].flatMap(language => {
-        const { title, summary, description } = textFor(value, primary, language)
-        const text = { title: title.trim(), summary: summary.trim(), description }
-        return hasText(text) ? [{ language, text }] : []
-      })
-      const [main, ...others] = filled
+      if (form.busy || mediaBusy || translation.busy) return
+      const fields = draftToFields({ ...load(), groupId }, primary, pendingTag)
+      const filled = [{ language: fields.lang ?? primary, text: fields },
+        ...languages.flatMap(language => {
+          const text = fields.translations?.[language]
+          return text ? [{ language, text }] : []
+        })]
       const incomplete = filled.find(({ text }) => !text.title || !text.summary)
-      if (!main || incomplete) {
-        const language = incomplete?.language ?? primary
+      if (incomplete) {
+        const language = incomplete.language
         setTab(language)
-        setIssue({ language, field: incomplete?.text.title ? 'summary' : 'title' })
-        return
-      }
-      const thumbnailUrl = value.thumbnailUrl?.trim() || undefined
-      if (thumbnailUrl && !isHttpsUrl(thumbnailUrl)) {
-        setInvalidImageUrl(true)
-        document.getElementById(imageInputId)?.focus()
+        setIssue({ language, field: incomplete.text.title ? 'summary' : 'title' })
         return
       }
       setIssue(undefined)
       void form.run(async () => {
-        const id = await runtime.saveProject({
-          ...main.text, lang: main.language,
-          translations: others.length ? Object.fromEntries(others.map(({ language, text }) => [language, text])) : undefined,
-          url: value.url.trim(), repoUrl: value.repoUrl.trim() || undefined,
-          tags: mergeTags(mergeTags([], value.tags), pendingTag), thumbnailCid: value.thumbnailCid, thumbnailUrl,
-          ...(groupId ? { groupId } : {}),
-        }, project?.projectId)
+        const id = await runtime.saveProject(fields, project?.projectId)
         runtime.preferences.setDraft(slot, null)
         location.hash = `#/p/${id}`
       })
     }}>
-      <fieldset disabled={form.busy || upload.busy} class="form-stack">
+      <fieldset disabled={form.busy || mediaBusy} class="form-stack">
         <div class="post-languages">
           <div class="row-between">
             <div class="post-tabs" role="tablist" aria-label={t.postLanguages}>
@@ -258,42 +245,18 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
           onChange={tags => update({ tags: tags.join(', ') })} />
         {myGroups.length > 0 && <Select label={t.group} value={groupId ?? ''} onChange={value => update({ groupId: value || undefined })}
           options={[{ value: '', label: t.noGroup }, ...myGroups.map(group => ({ value: group.record.groupId, label: group.record.name }))]} />}
-        <div class="form-columns">
-          <FilePicker label={t.thumbnail} choose={t.chooseImage} hint={t.dropImage}
-            accept="image/jpeg,image/png,image/webp" disabled={form.busy || upload.busy}
-            fileName={picked && picked.cid === draft.thumbnailCid ? picked.name : undefined}
-            onPick={file => {
-              void upload.run(async () => {
-                const cid = await saveThumbnail(file)
-                update({ thumbnailCid: cid, thumbnailUrl: undefined })
-                setPicked({ cid, name: file.name })
-              })
-            }} />
-          <div class="image-url-field">
-            <label>{t.thumbnailUrl}<input id={imageInputId} inputMode="url" maxLength={LIMITS.url} placeholder="https://"
-              value={draft.thumbnailUrl ?? ''} aria-invalid={badImage || undefined}
-              aria-describedby={badImage || failedImage ? imageErrorId : undefined} onInput={e => {
-                const next = e.currentTarget.value
-                update(next.trim() ? { thumbnailUrl: next, thumbnailCid: undefined } : { thumbnailUrl: undefined })
-                setInvalidImageUrl(false)
-                setFailedImageUrl(undefined)
-              }} /></label>
-            {badImage && <span id={imageErrorId} class="error" role="alert">{t.invalidThumbnailUrl}</span>}
-            {failedImage && <span id={imageErrorId} class="muted" role="status">{t.thumbnailLoadFailed}</span>}
-          </div>
-        </div>
-        {(draft.thumbnailCid || imageUrl || automatic) && <div class="draft-image">
-          <Thumbnail cid={draft.thumbnailCid} url={imageUrl} projectUrl={automatic} title={currentText.title || draft.title}
-            onError={imageUrl ? () => setFailedImageUrl(imageUrl) : undefined} />
-          {(draft.thumbnailCid || imageUrl) && <button type="button" onClick={() => {
-            update({ thumbnailCid: undefined, thumbnailUrl: undefined })
-            setFailedImageUrl(undefined)
-          }}>{t.removeImage}</button>}
-        </div>}
+        <MediaEditor key={slot} items={draft.media ?? []} title={currentText.title || draft.title}
+          autoPreviewUrl={automatic} disabled={form.busy || mediaBusy} onBusyChange={setMediaBusy}
+          onChange={media => update({ media: media.length ? media : undefined })} />
       </fieldset>
-      {upload.busy && <p role="status">{t.savingImage}</p>}
-      <ErrorText message={form.error || upload.error} />
-      <div class="actions"><button type="submit" class="primary" disabled={form.busy || upload.busy || translation.busy}>{project ? t.saveChanges : t.publish}</button></div>
+      <ErrorText message={form.error} />
+      <div class="actions">
+        <button type="submit" class="primary" disabled={form.busy || mediaBusy || translation.busy}>{project ? t.saveChanges : t.publish}</button>
+        <button type="button" onClick={() => setPreviewing(true)}>{t.preview}</button>
+      </div>
+      {previewing && <ProjectPreviewDialog fields={draftToFields({ ...draft, groupId }, primary, pendingTag)}
+        authorDid={self} authorName={runtime.displayNameFor(self)}
+        group={myGroups.find(group => group.record.groupId === groupId)} onClose={() => setPreviewing(false)} />}
     </ValidatedForm>
   </section>
 }

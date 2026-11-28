@@ -1,10 +1,10 @@
 import { compareStrings, stableStringify } from './wireSign'
-import { bounded, hasOnly, isObject, LIMITS, validCid, validDate, validId, validProjectLanguages } from './wires'
+import { bounded, hasOnly, isObject, LIMITS, validCid, validDate, validId, validMediaList, validProjectLanguages } from './wires'
 import type { ProjectFields, ProjectText } from './wires'
 
 const KEY = 'gdm-world:preferences:v1'
 export type Theme = 'light' | 'dark'
-export type Draft = ProjectText & Pick<ProjectFields, 'lang' | 'translations' | 'thumbnailCid' | 'thumbnailUrl' | 'groupId'> & {
+export type Draft = ProjectText & Pick<ProjectFields, 'lang' | 'translations' | 'thumbnailCid' | 'thumbnailUrl' | 'media' | 'groupId'> & {
   url: string; repoUrl: string; tags: string
 }
 type Entry<T> = { at: number; value: T }
@@ -16,8 +16,9 @@ const emptyPreferences = (): Preferences => ({ v: 1, drafts: {} })
 const validTheme = (value: unknown): value is Theme => value === 'light' || value === 'dark'
 const validSlot = (slot: string) => slot === 'new' || validId(slot)
 const validDraft = (value: unknown): value is Draft => isObject(value)
-  && hasOnly(value, ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'groupId'])
+  && hasOnly(value, ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'media', 'groupId'])
   && validProjectLanguages(value, true)
+  && (value.media === undefined || validMediaList(value.media, true))
   && (value.groupId === undefined || validId(value.groupId))
   && bounded(value.title, LIMITS.title, true) && bounded(value.summary, LIMITS.summary, true)
   && bounded(value.description, LIMITS.description, true) && bounded(value.url, LIMITS.url, true)

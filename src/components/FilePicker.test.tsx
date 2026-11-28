@@ -67,3 +67,20 @@ it('ignores dropped files while disabled', () => {
   act(() => { dropzone.dispatchEvent(dragEvent('drop', transfer)) })
   expect(onPick).not.toHaveBeenCalled()
 })
+
+it('passes all selected or dropped files in order in multiple mode', () => {
+  const onPickMany = vi.fn()
+  const other = new File(['def'], 'other.png', { type: 'image/png' })
+  const transfer = new DataTransfer()
+  transfer.items.add(file)
+  transfer.items.add(other)
+  act(() => render(<FilePicker choose="Choose images" hint="Or drop images here" accept="image/png"
+    multiple onPickMany={onPickMany} />, host))
+  const input = host.querySelector('input')!
+  expect(input.multiple).toBe(true)
+  input.files = transfer.files
+  act(() => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(input.value).toBe('')
+  act(() => { host.querySelector('.file-dropzone')!.dispatchEvent(dragEvent('drop', transfer)) })
+  expect(onPickMany.mock.calls).toEqual([[[file, other]], [[file, other]]])
+})

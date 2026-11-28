@@ -12,11 +12,13 @@ import { AuthorLink, BackLink, ConfirmDialog, EmptyState, ErrorText } from './co
 import { Icon } from './Icon'
 import { MarkdownView } from './MarkdownView'
 
-export function GroupLink({ group }: { group: GroupView }) {
+export function GroupLink({ group, link = true }: { group: GroupView; link?: boolean }) {
   const t = useMessages()
-  return <a class="group-link" href={groupHref(group.record.groupId)} aria-label={t.groups.view(group.record.name)}>
+  const Element = link ? 'a' : 'span'
+  return <Element class="group-link" href={link ? groupHref(group.record.groupId) : undefined}
+    aria-label={link ? t.groups.view(group.record.name) : undefined}>
     <Icon name="users" /><bdi>{group.record.name}</bdi>
-  </a>
+  </Element>
 }
 
 function groupProjects(catalog: Catalog, groupId: string) {

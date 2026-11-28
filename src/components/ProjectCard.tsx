@@ -1,10 +1,11 @@
-import { useContext } from 'preact/hooks'
+import { useContext, useId } from 'preact/hooks'
 import { documentLanguages, LanguageContext, useMessages } from '../i18n'
 import { openProjectFromCatalog } from '../hooks/useHashRoute'
 import { localizedProject } from '../lib/localizedProject'
-import { personId } from '../lib/wires'
+import { coverFor } from '../lib/cover'
+import { isHttpUrl, personId } from '../lib/wires'
 import type { GroupView } from '../lib/catalogStore'
-import type { ProjectRecord } from '../lib/wires'
+import type { ProjectFields, ProjectRecord } from '../lib/wires'
 import { AuthorLink, DateText, ExternalLink, Tags } from './common'
 import { GroupLink } from './Groups'
 import { Thumbnail } from './Thumbnail'
@@ -12,31 +13,47 @@ import { Thumbnail } from './Thumbnail'
 export function ProjectCard({ project, displayNameFor, group, onOpen }: {
   project: ProjectRecord; displayNameFor(did: string): string | undefined; group?: GroupView; onOpen(): void
 }) {
-  const t = useMessages()
-  const { title, summary, lang } = localizedProject(project, useContext(LanguageContext))
-  const locale = lang && documentLanguages[lang]
   const author = personId(project)
-  const titleId = `project-title-${project.projectId}`
+  return <ProjectCardView fields={project} projectId={project.projectId} updatedAt={project.updatedAt}
+    authorDid={author} authorName={displayNameFor(author)} group={group} onOpen={onOpen} />
+}
+
+export function ProjectCardView({ fields, projectId, updatedAt, authorDid, authorName, group, onOpen, preview = false }: {
+  fields: ProjectFields; projectId?: string; updatedAt: number; authorDid: string; authorName?: string; group?: GroupView
+  onOpen?(): void; preview?: boolean
+}) {
+  const t = useMessages()
+  const language = useContext(LanguageContext)
+  const { title, summary, lang } = localizedProject(fields, language)
+  const locale = lang && documentLanguages[lang]
+  const untitled = preview && !title.trim()
+  const displayTitle = untitled ? t.previewUntitled : title
+  const fallbackId = useId()
+  const titleId = `project-title-${projectId ?? fallbackId}`
+  const url = preview && !isHttpUrl(fields.url) ? '' : fields.url
+  const repoUrl = preview && !isHttpUrl(fields.repoUrl) ? undefined : fields.repoUrl
   return <article class="work-card work-card--games" aria-labelledby={titleId}>
-    <div class="work-visual"><Thumbnail cid={project.thumbnailCid} url={project.thumbnailUrl} projectUrl={project.url} title={title} decorative /></div>
+    <div class="work-visual"><Thumbnail {...coverFor(fields)} projectUrl={url} title={displayTitle} decorative /></div>
     <div class="work-content">
-      <h2 id={titleId} lang={locale}><a class="card-title" href={`#/p/${project.projectId}`} onClick={event => {
-        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-        event.preventDefault()
-        event.currentTarget.focus({ preventScroll: true })
-        openProjectFromCatalog(project.projectId)
-      }}>{title}</a></h2>
+      <h2 id={titleId} lang={untitled ? documentLanguages[language] : locale}>
+        {projectId && !preview ? <a class="card-title" href={`#/p/${projectId}`} onClick={event => {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+          event.preventDefault()
+          event.currentTarget.focus({ preventScroll: true })
+          openProjectFromCatalog(projectId)
+        }}>{displayTitle}</a> : displayTitle}
+      </h2>
       <p class="work-meta">
-        <DateText at={project.updatedAt} dateOnly /><span aria-hidden="true"> · </span>
+        <DateText at={updatedAt} dateOnly /><span aria-hidden="true"> · </span>
         <span class="sr-only">{t.author} </span>
-        <AuthorLink did={author} name={displayNameFor(author)} />
-        {group && <><span aria-hidden="true"> · </span><span class="sr-only">{t.group} </span><GroupLink group={group} /></>}
+        <AuthorLink did={authorDid} name={authorName} link={!preview} />
+        {group && <><span aria-hidden="true"> · </span><span class="sr-only">{t.group} </span><GroupLink group={group} link={!preview} /></>}
       </p>
-      <Tags tags={project.tags} />
+      <Tags tags={fields.tags} />
       <p class="work-description" lang={locale}>{summary}</p>
-      {(project.url || project.repoUrl) && <div class="work-actions">
-        {project.url && <ExternalLink href={project.url} primary onOpen={onOpen}>{t.open}</ExternalLink>}
-        {project.repoUrl && <ExternalLink href={project.repoUrl} primary={!project.url}>{t.repository}</ExternalLink>}
+      {(url || repoUrl) && <div class="work-actions">
+        {url && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpen}>{t.open}</ExternalLink>}
+        {repoUrl && <ExternalLink href={repoUrl} primary={!url}>{t.repository}</ExternalLink>}
       </div>}
     </div>
   </article>

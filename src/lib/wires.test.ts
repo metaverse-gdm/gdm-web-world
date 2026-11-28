@@ -176,6 +176,12 @@ describe('wire validation and signatures', () => {
     expect(localizedProject(signed, 'en')).toEqual(primary)
     expect(readWire({ ...project, translations: { en: { ...english, title: 'Changed' } } })).toBeUndefined()
   })
+  it('signs a media gallery of uploads, images and videos', async () => {
+    const project = await upsert(alice, {
+      media: [{ cid: 'A'.repeat(32) }, { url: 'https://example.com/shot.png' }, { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }],
+    })
+    expect(readRecord(JSON.parse(JSON.stringify(project)))).toEqual(project)
+  })
   it('verifies a signed profile as a catalog record', async () => {
     const profile = await makeWire(alice, { type: 'gdmw:profile', displayName: '開発チーム', updatedAt: 25 })
     const parsed = readRecord(JSON.parse(JSON.stringify(profile)))
@@ -249,6 +255,9 @@ describe('wire validation and signatures', () => {
     { thumbnailUrl: 'http://example.com/image.png' }, { thumbnailUrl: 'https://user@example.com/image.png' },
     { thumbnailUrl: 'https://example.com/' + 'a'.repeat(LIMITS.url) }, { thumbnailUrl: '' },
     { thumbnailUrl: 'https://example.com/image.png', thumbnailCid: 'A'.repeat(32) },
+    { media: [] }, { media: {} }, { media: [{ url: 'http://example.com/a.png' }] }, { media: [{ cid: 'bad' }] },
+    { media: [{ url: 'https://example.com/a.png', cid: 'A'.repeat(32) }] }, { media: [{ src: 'https://example.com/a.png' }] },
+    { media: Array.from({ length: LIMITS.media + 1 }, (_, i) => ({ url: `https://example.com/${i}.png` })) },
   ])('rejects invalid fields even when correctly signed (%o)', async update => {
     const fields = { ...signed, ...update }
     expect(readWire(await signWireWithDelegation(fields, alice))).toBeUndefined()
