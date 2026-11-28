@@ -18,7 +18,7 @@ it('uses the first gallery image or known video poster for a card cover', () => 
   expect(coverFor({ url, media: [{ cid }, { url: image }] })).toEqual({ cid, mediaImage: true, projectUrl: url })
   expect(coverFor({ url, media: [{ url: image }] })).toEqual({ url: image, projectUrl: url })
   expect(coverFor({ url, media: [{ url: youtube }] })).toEqual({
-    url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg', projectUrl: url,
+    url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg', projectUrl: url,
   })
 })
 

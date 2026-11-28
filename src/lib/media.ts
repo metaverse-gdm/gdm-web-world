@@ -58,7 +58,7 @@ function youtube(url: URL): VideoEmbed | undefined {
     provider: 'youtube', id,
     embedUrl: `https://www.youtube-nocookie.com/embed/${id}?${params}`,
     watchUrl: `https://www.youtube.com/watch?v=${id}${start ? `&t=${start}s` : ''}`,
-    poster: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    poster: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
   }
 }
 

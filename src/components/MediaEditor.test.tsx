@@ -82,7 +82,7 @@ it('adds a YouTube URL with Enter without submitting and shows a poster and prov
   expect(input().value).toBe('')
   expect(tiles()[0].textContent).toContain('YouTube')
   const poster = tiles()[0].querySelector('img')!
-  expect(poster.getAttribute('src')).toBe('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg')
+  expect(poster.getAttribute('src')).toBe('https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg')
   expect(poster.getAttribute('referrerpolicy')).toBe('no-referrer')
   expect(tiles()[0].querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Project video 1')
 })

@@ -89,7 +89,7 @@ it('moves focus with keyboard filmstrip navigation but leaves editable controls 
 it('only mounts the privacy-enhanced YouTube player on play and resets it when leaving the slide', () => {
   setup([{ url: youtube }, { url: first }])
   expect(stage().querySelector('iframe')).toBeNull()
-  expect(stage().querySelector('img')?.getAttribute('src')).toBe('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg')
+  expect(stage().querySelector('img')?.getAttribute('src')).toBe('https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg')
   expect(gallery().textContent).toContain('Playing loads the YouTube player.')
   const watch = gallery().querySelector<HTMLAnchorElement>('.media-gallery-embed-info a')!
   expect(watch.textContent?.trim()).toBe('Open on YouTube')

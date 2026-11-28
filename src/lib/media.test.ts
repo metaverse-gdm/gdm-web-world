@@ -13,7 +13,7 @@ describe('parseVideoEmbed', () => {
     expect(embed).toMatchObject({
       provider: 'youtube', id: youtubeId,
       watchUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
-      poster: `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`,
+      poster: `https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`,
     })
     const player = new URL(embed.embedUrl)
     expect(player.origin).toBe('https://www.youtube-nocookie.com')
