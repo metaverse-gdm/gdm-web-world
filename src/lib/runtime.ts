@@ -15,7 +15,7 @@ import { createStatsPublisher } from './statsPublisher'
 import { createStatsStore, parseStatsSnapshot, STATS_KEY } from './statsStore'
 import { createCatalogAdapter } from './vault/catalogAdapter'
 import { createSharedVault } from './vault/controllers'
-import { bounded, isCatalog, LIMITS, makeWire, personId, REQUEST_INTERVAL_MS, validGroupFields, validProjectFields } from './wires'
+import { bounded, isCatalog, LIMITS, makeWire, personId, REQUEST_INTERVAL_MS, validCid, validGroupFields, validProjectFields } from './wires'
 import type { CatalogRecord, GroupFields, ProjectFields, ProjectRecord, RequestRecord, Role, StatsMetric, StatsRecord, VerifiedRecord } from './wires'
 
 const transientIdentity = new Map<string, string>()
@@ -132,8 +132,8 @@ export async function createRuntime() {
     network.send(null, wire)
   }
   const statsPublisher = createStatsPublisher({ identity, selfId: () => localPerson.get().id, store: stats, ready: statsMirror.ready, publish })
-  /** `bio` undefined keeps the current signed bio; an empty string clears it. */
-  function writeProfile(did: string, name: string, onlyIfMissing = false, bio?: string) {
+  /** Undefined keeps the current signed field; empty bio or null avatar clears it. */
+  function writeProfile(did: string, name: string, onlyIfMissing = false, bio?: string, avatarCid?: string | null) {
     const operation = profileWrites.then(async () => {
       await mirror.ready
       const eligible = () => !disposed && localPerson.get().id === did && !!current().roles.get(did)
@@ -141,10 +141,13 @@ export async function createRuntime() {
       while (eligible()) {
         const previous = catalog.profiles.get(did)
         const nextBio = bio ?? previous?.bio ?? ''
-        if (previous && (onlyIfMissing || previous.displayName === name && (previous.bio ?? '') === nextBio)) return
+        const nextAvatar = avatarCid === undefined ? previous?.avatarCid : avatarCid ?? undefined
+        if (previous && (onlyIfMissing || previous.displayName === name && (previous.bio ?? '') === nextBio
+          && previous.avatarCid === nextAvatar)) return
         const updatedAt = Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1)
         const wire = await makeWire(identity, {
-          type: 'gdmw:profile', displayName: name, ...(nextBio ? { bio: nextBio } : {}), updatedAt,
+          type: 'gdmw:profile', displayName: name, ...(nextBio ? { bio: nextBio } : {}),
+          ...(nextAvatar ? { avatarCid: nextAvatar } : {}), updatedAt,
         })
         if (!eligible() || personId(wire) !== did) return
         // A peer may have updated the same profile while this leaf was signing.
@@ -173,13 +176,14 @@ export async function createRuntime() {
     if (name !== preferences.get().displayName?.value) preferences.setName(name)
     if (name) await writeProfile(did, name)
   }
-  async function saveProfile(value: { displayName: string; bio: string }) {
+  async function saveProfile(value: { displayName: string; bio: string; avatarCid?: string | null }) {
     const name = value.displayName.trim()
     const bio = value.bio.trim()
-    if (!bounded(name, LIMITS.displayName) || !bounded(bio, LIMITS.bio, true)) throw new Error('入力内容を確認してください。')
+    if (!bounded(name, LIMITS.displayName) || !bounded(bio, LIMITS.bio, true)
+      || value.avatarCid != null && !validCid(value.avatarCid)) throw new Error('入力内容を確認してください。')
     const did = requireMember()
     if (name !== preferences.get().displayName?.value) preferences.setName(name)
-    await writeProfile(did, name, false, bio)
+    await writeProfile(did, name, false, bio, value.avatarCid)
   }
   bootstrapProfile()
   const requireAdmin = () => {
@@ -223,6 +227,9 @@ export async function createRuntime() {
     bioFor(did: string) {
       const { roles, profiles } = current()
       if (roles.get(did)) return profiles.get(did)?.bio
+    },
+    avatarFor(did: string) {
+      return current().profiles.get(did)?.avatarCid
     },
     saveDisplayName,
     saveProfile,
@@ -297,6 +304,7 @@ export async function createRuntime() {
       const value: GroupFields = {
         name: fields.name.trim(),
         ...(fields.bio?.trim() ? { bio: fields.bio.trim() } : {}),
+        ...(fields.avatarCid !== undefined ? { avatarCid: fields.avatarCid } : {}),
         members: [...new Set(fields.members)].filter(did => did !== owner),
       }
       if (!validGroupFields(value)) throw new Error('入力内容を確認してください。')

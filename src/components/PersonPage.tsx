@@ -4,23 +4,34 @@ import { useMessages } from '../i18n'
 import type { Runtime } from '../lib/runtime'
 import { LIMITS, personId } from '../lib/wires'
 import { CatalogPage } from './Catalog'
+import { Avatar } from './Avatar'
+import { AvatarEditor } from './AvatarEditor'
 import { BackLink, CopyDid, ErrorText } from './common'
 import { GroupLink } from './Groups'
 import { Icon } from './Icon'
 import { MarkdownView } from './MarkdownView'
 
-function ProfileEditor({ runtime, name, bio, onDone }: { runtime: Runtime; name?: string; bio?: string; onDone(): void }) {
+function ProfileEditor({ runtime, name, bio, avatarCid, onDone }: {
+  runtime: Runtime; name?: string; bio?: string; avatarCid?: string; onDone(): void
+}) {
   const t = useMessages()
   const action = useAction()
   const hint = useId()
+  const [avatar, setAvatar] = useState(avatarCid)
+  const [avatarChanged, setAvatarChanged] = useState(false)
+  const [uploading, setUploading] = useState(false)
   return <form class="form-stack profile-editor" onSubmit={event => {
     event.preventDefault()
+    if (uploading || action.busy) return
     const data = new FormData(event.currentTarget)
     void action.run(async () => {
-      await runtime.saveProfile({ displayName: String(data.get('displayName') ?? ''), bio: String(data.get('bio') ?? '') })
+      await runtime.saveProfile({ displayName: String(data.get('displayName') ?? ''), bio: String(data.get('bio') ?? ''),
+        ...(avatarChanged ? { avatarCid: avatar ?? null } : {}) })
       onDone()
     })
   }}>
+    <AvatarEditor cid={avatarChanged ? avatar : avatarCid} disabled={action.busy}
+      onChange={cid => { setAvatar(cid); setAvatarChanged(true) }} onBusyChange={setUploading} />
     <label>{t.displayName}
       <input name="displayName" required maxLength={LIMITS.displayName} defaultValue={name ?? ''} disabled={action.busy} autoFocus />
     </label>
@@ -30,8 +41,8 @@ function ProfileEditor({ runtime, name, bio, onDone }: { runtime: Runtime; name?
     </label>
     <ErrorText message={action.error} />
     <div class="actions">
-      <button type="button" disabled={action.busy} onClick={onDone}>{t.cancel}</button>
-      <button class="primary" disabled={action.busy}>{t.saveProfile}</button>
+      <button type="button" disabled={action.busy || uploading} onClick={onDone}>{t.cancel}</button>
+      <button class="primary" disabled={action.busy || uploading}>{t.saveProfile}</button>
     </div>
   </form>
 }
@@ -45,6 +56,7 @@ export function PersonPage({ did, runtime, impressionsActive }: { did: string; r
   const projects = useMemo(() => new Map([...catalog.projects].filter(([, project]) => personId(project) === did)), [catalog.projects, did])
   const name = runtime.displayNameFor(did)
   const bio = runtime.bioFor(did)
+  const avatarCid = runtime.avatarFor(did)
   const own = self.id === did
   const canEdit = own && !!catalog.roles.get(did)
   const groups = [...catalog.groups.values()].filter(group => group.members.includes(did))
@@ -56,13 +68,13 @@ export function PersonPage({ did, runtime, impressionsActive }: { did: string; r
       <BackLink label={t.allProjects} />
       <div class="panel profile-panel">
         <div class="row-between detail-heading">
-          <h1 id={headingId} data-unnamed={!name || undefined}>{name ?? t.unnamedPerson}</h1>
+          <h1 id={headingId} data-unnamed={!name || undefined}><Avatar cid={avatarCid} large />{name ?? t.unnamedPerson}</h1>
           {canEdit && !editing && <button type="button" class="icon-button" aria-label={t.editProfile} data-tooltip={t.editProfile}
             onClick={() => setEditing(true)}><Icon name="edit" /></button>}
         </div>
         <CopyDid did={did} delegated={delegated} />
-        {editing
-          ? <ProfileEditor runtime={runtime} name={name} bio={bio} onDone={() => setEditing(false)} />
+        {editing && canEdit
+          ? <ProfileEditor runtime={runtime} name={name} bio={bio} avatarCid={avatarCid} onDone={() => setEditing(false)} />
           : bio
             ? <div class="description profile-bio"><MarkdownView text={bio} /></div>
             : own && <p class="muted">{canEdit ? t.bioEmpty : t.profileNeedsMember}</p>}
@@ -75,7 +87,7 @@ export function PersonPage({ did, runtime, impressionsActive }: { did: string; r
       </div>
       <h2 class="person-projects-heading">{t.personProjects}<span class="muted">{projects.size}</span></h2>
     </section>
-    <CatalogPage projects={projects} displayNameFor={runtime.displayNameFor} groupFor={runtime.groupFor} trackProject={runtime.trackProject}
+    <CatalogPage projects={projects} displayNameFor={runtime.displayNameFor} avatarFor={runtime.avatarFor} groupFor={runtime.groupFor} trackProject={runtime.trackProject}
       impressionsActive={impressionsActive} label={t.personProjects} emptyMessage={t.noPersonProjects} />
   </>
 }

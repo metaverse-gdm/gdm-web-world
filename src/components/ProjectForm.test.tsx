@@ -38,7 +38,7 @@ function setup(project?: ProjectRecord, draft?: Draft) {
   if (draft) preferences.setDraft(project?.projectId ?? 'new', draft)
   const saveProject = vi.fn<Runtime['saveProject']>(async () => PROJECT_ID)
   const runtime = {
-    preferences, saveProject, getSelf: () => ({ id: 'did:key:self' }), getCatalog: () => ({ groups: new Map() }), displayNameFor: () => 'Me',
+    preferences, saveProject, getSelf: () => ({ id: 'did:key:self' }), getCatalog: () => ({ groups: new Map() }), displayNameFor: () => 'Me', avatarFor: () => undefined,
   } as unknown as Runtime
   function Harness() {
     const [, refresh] = useState(0)
@@ -61,6 +61,42 @@ const activePanel = '[role="tabpanel"]:not([hidden])'
 const tab = (lang: string) => host.querySelector<HTMLButtonElement>(`[role="tab"][lang="${lang}"]`)!
 const submit = () => act(async () => {
   host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }))
+})
+
+it('publishes a project without a URL and clears its draft', async () => {
+  const { preferences, saveProject } = setup()
+  type(activePanel + ' input', 'Game without a website')
+  type(activePanel + ' textarea', 'A work in progress')
+  const url = host.querySelector<HTMLInputElement>('input[type="url"]')!
+  expect(url.required).toBe(false)
+  expect(url.value).toBe('')
+  expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false)
+  await submit()
+  expect(saveProject).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'Game without a website', summary: 'A work in progress' }), undefined)
+  expect(saveProject.mock.calls[0][0]).not.toHaveProperty('url')
+  expect(preferences.get().drafts.new.value).toBeNull()
+  expect(resolvePreviewImage).not.toHaveBeenCalled()
+})
+
+it('still rejects a malformed URL when one is entered', async () => {
+  const { saveProject } = setup()
+  type(activePanel + ' input', 'Game')
+  type(activePanel + ' textarea', 'Summary')
+  type('input[type="url"]', 'not a URL')
+  await submit()
+  expect(saveProject).not.toHaveBeenCalled()
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe('Enter a valid URL.')
+})
+
+it('allows editing a project without a URL and removing an existing URL', async () => {
+  const project = { ...projectFields, url: undefined, projectId: PROJECT_ID } as ProjectRecord
+  const { saveProject } = setup(project)
+  expect(host.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe('')
+  type('input[type="url"]', 'https://example.com/game')
+  type('input[type="url"]', '')
+  await submit()
+  expect(saveProject).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: project.title }), PROJECT_ID)
+  expect(saveProject.mock.calls[0][0]).not.toHaveProperty('url')
 })
 
 function configureAi() {

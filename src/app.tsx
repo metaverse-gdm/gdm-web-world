@@ -9,6 +9,7 @@ import { isCatalogRoute, useHashRoute } from './hooks/useHashRoute'
 import { BackLink, CopyDid, EmptyState, ErrorText, PersonName } from './components/common'
 import { CatalogPage } from './components/Catalog'
 import { PersonPage } from './components/PersonPage'
+import { TagPage } from './components/TagPage'
 import { GroupForm, GroupPage, GroupsPage } from './components/Groups'
 import { ProjectDialog } from './components/ProjectDialog'
 import { ApprovalPrompt, ProjectForm } from './components/ProjectForm'
@@ -54,8 +55,8 @@ function Header({ runtime, page, lang, setLang }: {
         <span class="network" role="status" data-status={network.status} data-tooltip={statusLabel}>
           <span class="status-dot" aria-hidden="true" /><span aria-hidden="true">{network.peers}</span><span class="sr-only">{statusLabel}</span>
         </span>
-        {self && (name
-          ? <PersonName did={self.id} name={name} delegated={!!self.delegation} />
+        {self && (name || role
+          ? <PersonName did={self.id} name={name} avatarCid={runtime?.avatarFor(self.id)} delegated={!!self.delegation} />
           : <CopyDid did={self.id} delegated={!!self.delegation} compact />)}
         <nav class="app-nav" aria-label={t.navigation}>
           <a class="icon-button nav-groups" href="#/groups" aria-current={page.startsWith('group') ? 'page' : undefined}
@@ -77,8 +78,8 @@ function AppShell({ route, runtime, failed, lang, setLang }: {
 }) {
   const t = useMessages()
   const catalogRoute = isCatalogRoute(route)
-  // A project opened from a person's or group's page keeps that page behind the dialog.
-  const ownBackground = route.page === 'person' || route.page === 'group' ? `${route.page}:${route.id}` : undefined
+  // A project opened from a person, group or tag page keeps that page behind the dialog.
+  const ownBackground = route.page === 'person' || route.page === 'group' || route.page === 'tag' ? `${route.page}:${route.id}` : undefined
   const [savedBackground, setSavedBackground] = useState(ownBackground)
   const background = ownBackground ?? (route.page === 'detail' ? savedBackground : undefined)
   if (background !== savedBackground) setSavedBackground(background)
@@ -89,10 +90,10 @@ function AppShell({ route, runtime, failed, lang, setLang }: {
   const detailId = route.page === 'detail' ? route.id : undefined
   const [modalId, setModalId] = useState(detailId)
   // Keep the dialog mounted when Back reveals the catalog, until its exit animation finishes.
-  const nextModalId = catalogRoute ? detailId ?? modalId : undefined
+  const previousRoute = useRef(routeKey)
+  const nextModalId = catalogRoute ? detailId ?? (previousRoute.current === routeKey ? modalId : undefined) : undefined
   if (modalId !== nextModalId) setModalId(nextModalId)
   const removeModal = useCallback(() => setModalId(undefined), [])
-  const previousRoute = useRef(routeKey)
   const main = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     if (previousRoute.current === routeKey) return
@@ -116,12 +117,15 @@ function AppShell({ route, runtime, failed, lang, setLang }: {
     switch (route.page) {
       case 'person':
       case 'group':
+      case 'tag':
       case 'catalog':
       case 'detail': content = backgroundPage === 'person'
         ? <PersonPage did={backgroundId} runtime={runtime} impressionsActive={!nextModalId} />
         : backgroundPage === 'group'
           ? <GroupPage groupId={backgroundId} runtime={runtime} impressionsActive={!nextModalId} />
-          : <CatalogPage projects={catalog.projects} displayNameFor={runtime.displayNameFor} groupFor={runtime.groupFor}
+          : backgroundPage === 'tag'
+            ? <TagPage tag={backgroundId} runtime={runtime} impressionsActive={!nextModalId} />
+            : <CatalogPage projects={catalog.projects} displayNameFor={runtime.displayNameFor} avatarFor={runtime.avatarFor} groupFor={runtime.groupFor}
             trackProject={runtime.trackProject} impressionsActive={!nextModalId} />; break
       case 'groups': content = <GroupsPage runtime={runtime} />; break
       case 'group-new': content = role ? <GroupForm runtime={runtime} />

@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { DidIdentity } from '../crypto/didIdentity'
 import { approve, identities, PROJECT_ID, remove, revoke, upsert } from '../test/fixtures'
-import { deriveCatalog, editOrder, mergeRecords, projectGroup } from './catalogStore'
-import { makeWire } from './wires'
+import { createRecordStore, deriveCatalog, editOrder, mergeRecords, projectGroup } from './catalogStore'
+import { makeWire, readRecord } from './wires'
 import type { CatalogPayload, CatalogRecord, PolicyRecord } from './wires'
 
 let root: DidIdentity, owner: DidIdentity, other: DidIdentity, admin: DidIdentity, stranger: DidIdentity
@@ -26,6 +26,23 @@ const membership = (from: DidIdentity, joined: boolean, updatedAt: number, group
   makeWire(from, { type: 'gdmw:group-membership', groupId, joined, updatedAt })
 
 describe('catalog projection and signed union', () => {
+  it('restores optional avatar CIDs from signed records and clears them with newer records', async () => {
+    const avatarCid = 'A'.repeat(32)
+    const [profile, group, clearedProfile, clearedGroup] = await Promise.all([
+      makeWire(owner, { type: 'gdmw:profile', displayName: 'Owner', avatarCid, updatedAt: 20 }),
+      groupUpsert(owner, { avatarCid }),
+      makeWire(owner, { type: 'gdmw:profile', displayName: 'Owner', updatedAt: 25 }),
+      groupUpsert(owner, { updatedAt: 25, rev: 2 }),
+    ])
+    const store = createRecordStore<CatalogRecord>()
+    const restore = (records: CatalogRecord[]) => records.map(record => readRecord(JSON.parse(JSON.stringify(record))) as CatalogRecord)
+    store.merge(restore([profile, group]))
+    expect(view(store.get()).profiles.get(owner.did)?.avatarCid).toBe(avatarCid)
+    expect(view(store.get()).groups.get(GROUP_ID)?.record.avatarCid).toBe(avatarCid)
+    store.merge(restore([clearedProfile, clearedGroup]))
+    expect(view(store.get()).profiles.get(owner.did)?.avatarCid).toBeUndefined()
+    expect(view(store.get()).groups.get(GROUP_ID)?.record.avatarCid).toBeUndefined()
+  })
   it('chooses a profile by updatedAt and signature and only exposes currently approved people', async () => {
     const profile = (from: DidIdentity, displayName: string, updatedAt: number) =>
       makeWire(from, { type: 'gdmw:profile', displayName, updatedAt })

@@ -9,7 +9,7 @@ function explicitCover(project: CoverFields): MediaItem | undefined {
 }
 
 /** Prefer an old record's explicit cover, then the first gallery item's still image. */
-export function coverFor(project: CoverFields): { cid?: string; url?: string; mediaImage?: boolean; projectUrl: string } {
+export function coverFor(project: CoverFields): { cid?: string; url?: string; mediaImage?: boolean; projectUrl?: string } {
   const cover = explicitCover(project)
   const projectUrl = project.url
   if (cover) return { ...cover, projectUrl }

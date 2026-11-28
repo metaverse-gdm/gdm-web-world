@@ -9,8 +9,8 @@ import '../styles/project-preview.css'
 
 const views = ['detail', 'card'] as const
 
-export function ProjectPreviewDialog({ fields, updatedAt, authorDid, authorName, group, onClose }: {
-  fields: ProjectFields; updatedAt?: number; authorDid: string; authorName?: string; group?: GroupView; onClose(): void
+export function ProjectPreviewDialog({ fields, updatedAt, authorDid, authorName, authorAvatarCid, group, onClose }: {
+  fields: ProjectFields; updatedAt?: number; authorDid: string; authorName?: string; authorAvatarCid?: string; group?: GroupView; onClose(): void
 }) {
   const t = useMessages()
   const id = useId()
@@ -24,7 +24,7 @@ export function ProjectPreviewDialog({ fields, updatedAt, authorDid, authorName,
   const backdropPressed = useRef(false)
   const [tab, setTab] = useState<typeof views[number]>('detail')
   const [openedAt] = useState(Date.now)
-  const data = { fields, updatedAt: updatedAt ?? openedAt, authorDid, authorName, group, preview: true }
+  const data = { fields, updatedAt: updatedAt ?? openedAt, authorDid, authorName, authorAvatarCid, group, preview: true }
 
   useLayoutEffect(() => {
     const element = dialog.current!

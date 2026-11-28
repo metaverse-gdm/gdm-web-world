@@ -7,7 +7,7 @@ import { catalogReplica } from './mistClient'
 import { createNetwork } from './network'
 import { createRuntime } from './runtime'
 import { utcDay } from './statsDays'
-import { makeWire } from './wires'
+import { makeWire, readRecord } from './wires'
 import type { Runtime } from './runtime'
 
 vi.mock('../config', async importOriginal => ({
@@ -37,6 +37,24 @@ afterEach(() => { runtime?.dispose(); runtime = undefined })
 const network = () => vi.mocked(createNetwork)
 const receive = () => network().mock.calls.at(-1)![0].receive
 const sent = () => vi.mocked(network().mock.results.at(-1)!.value.send)
+
+it('publishes and updates a project without a URL as a signed catalog record', async () => {
+  const [root] = await identities()
+  ROOT_ADMIN_DIDS.push(root.did)
+  const app = runtime = await createRuntime()
+  receive()([await approve(root, app.identity, 'member', Date.now())], false)
+  const fields = { title: 'Game', summary: 'Fun', description: '', tags: [] }
+  const id = await app.saveProject(fields)
+  const first = app.getCatalog().projects.get(id)!
+  expect(first).not.toHaveProperty('url')
+  expect(readRecord(JSON.parse(JSON.stringify(first)))).toEqual(first)
+  await app.saveProject({ ...fields, url: 'https://example.com/game' }, id)
+  expect(app.getCatalog().projects.get(id)?.url).toBe('https://example.com/game')
+  await app.saveProject(fields, id)
+  expect(app.getCatalog().projects.get(id)).toMatchObject({ rev: 3 })
+  expect(app.getCatalog().projects.get(id)).not.toHaveProperty('url')
+  await expect(app.saveProject({ ...fields, url: 'not a URL' }, id)).rejects.toThrow()
+})
 
 it('falls back to the latest retained request name for an approved person until a profile arrives', async () => {
   const [root, author] = await identities()
@@ -120,9 +138,10 @@ it('creates a group, lets an invitee join and post under it, and enforces owners
     await approve(root, app.identity, 'member', now), await approve(root, friend, 'member', now),
     await approve(root, stranger, 'member', now),
   ], false)
-  const groupId = await app.saveGroup({ name: ' Circle ', bio: ' Hello ', members: [friend.did, app.identity.did] })
+  const avatarCid = 'A'.repeat(32)
+  const groupId = await app.saveGroup({ name: ' Circle ', bio: ' Hello ', avatarCid, members: [friend.did, app.identity.did] })
   const group = app.getCatalog().groups.get(groupId)!
-  expect(group.record).toMatchObject({ name: 'Circle', bio: 'Hello', members: [friend.did], rev: 1 })
+  expect(group.record).toMatchObject({ name: 'Circle', bio: 'Hello', avatarCid, members: [friend.did], rev: 1 })
   expect(group).toMatchObject({ owner: app.identity.did, members: [app.identity.did], invited: [friend.did] })
   await expect(app.setGroupMembership(groupId, false)).rejects.toThrow()
 
@@ -140,26 +159,33 @@ it('creates a group, lets an invitee join and post under it, and enforces owners
     createdAt: Date.now(), updatedAt: Date.now(), rev: 1,
   })
   receive()([strangerGroup], false)
-  await expect(app.saveGroup({ name: 'Hijack', members: [] }, PROJECT_ID)).rejects.toThrow()
+  await expect(app.saveGroup({ name: 'Hijack', avatarCid, members: [] }, PROJECT_ID)).rejects.toThrow()
   await app.setGroupMembership(PROJECT_ID, false)
   expect(app.getCatalog().groups.get(PROJECT_ID)).toMatchObject({ invited: [], declined: [app.identity.did] })
   await app.setGroupMembership(PROJECT_ID, true)
   expect(app.getCatalog().groups.get(PROJECT_ID)?.members).toEqual([stranger.did, app.identity.did])
 
+  await app.saveGroup({ name: 'Circle', bio: 'Hello', avatarCid: 'B'.repeat(32), members: [friend.did] }, groupId)
+  expect(app.getCatalog().groups.get(groupId)?.record.avatarCid).toBe('B'.repeat(32))
+  await app.saveGroup({ name: 'Circle', bio: 'Hello', members: [friend.did] }, groupId)
+  expect(app.getCatalog().groups.get(groupId)?.record.avatarCid).toBeUndefined()
   await app.deleteGroup(groupId)
   expect(app.getCatalog().groups.has(groupId)).toBe(false)
   expect(app.groupFor(app.getCatalog().projects.get(projectId)!)).toBeUndefined()
 })
 
-it('keeps the signed bio when only the display name changes', async () => {
+it('keeps the signed bio and avatar when only the display name changes, and allows clearing them', async () => {
   const [root] = await identities()
   ROOT_ADMIN_DIDS.push(root.did)
   const app = runtime = await createRuntime()
   receive()([await approve(root, app.identity, 'member', Date.now())], false)
-  await app.saveProfile({ displayName: ' Sakura ', bio: ' About us ' })
+  const avatarCid = 'A'.repeat(32)
+  await app.saveProfile({ displayName: ' Sakura ', bio: ' About us ', avatarCid })
   expect(app.bioFor(app.identity.did)).toBe('About us')
+  expect(app.avatarFor(app.identity.did)).toBe(avatarCid)
   await app.saveDisplayName('Sakura Studio')
-  expect(app.getCatalog().profiles.get(app.identity.did)).toMatchObject({ displayName: 'Sakura Studio', bio: 'About us' })
-  await app.saveProfile({ displayName: 'Sakura Studio', bio: '' })
+  expect(app.getCatalog().profiles.get(app.identity.did)).toMatchObject({ displayName: 'Sakura Studio', bio: 'About us', avatarCid })
+  await app.saveProfile({ displayName: 'Sakura Studio', bio: '', avatarCid: null })
   expect(app.bioFor(app.identity.did)).toBeUndefined()
+  expect(app.avatarFor(app.identity.did)).toBeUndefined()
 })

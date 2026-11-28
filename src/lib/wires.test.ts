@@ -35,7 +35,7 @@ describe('group wires', () => {
   it('round-trips group upserts, deletes and both membership states as catalog records', async () => {
     const records = await Promise.all([
       makeWire(alice, { ...groupFields, members: [] }),
-      makeWire(alice, { ...groupFields, bio: 'About the club', members: [bob.did] }),
+      makeWire(alice, { ...groupFields, bio: 'About the club', avatarCid: 'A'.repeat(32), members: [bob.did] }),
       makeWire(alice, { type: 'gdmw:group-delete', groupId, deletedAt: now }),
       makeWire(bob, { type: 'gdmw:group-membership', groupId, joined: true, updatedAt: now }),
       makeWire(bob, { type: 'gdmw:group-membership', groupId, joined: false, updatedAt: now }),
@@ -51,6 +51,7 @@ describe('group wires', () => {
     { name: '' }, { name: ' ' }, { name: ' Club' }, { name: 'Club ' },
     { name: 'a'.repeat(LIMITS.groupName + 1) },
     { bio: '' }, { bio: ' About' }, { bio: 'About ' }, { bio: 'a'.repeat(LIMITS.bio + 1) }, { bio: 1 },
+    { avatarCid: '' }, { avatarCid: 'https://example.com/image.png' }, { avatarCid: null },
     { members: ['not-a-did'] }, { members: 'not-an-array' },
     { groupId: 'abc' }, { groupId: '190b17ef-7ad2-13e4-b374-351e89cc5c45' },
     { createdAt: 0 }, { updatedAt: 19 }, { rev: 0 }, { rev: 1.5 },
@@ -156,6 +157,14 @@ describe('stats wires', () => {
 })
 
 describe('wire validation and signatures', () => {
+  it('round-trips a signed project with no URL and does not allow changing its URL without re-signing', async () => {
+    const project = await upsert(alice, { url: undefined })
+    const serialized = JSON.parse(JSON.stringify(project))
+    expect(serialized).not.toHaveProperty('url')
+    expect(readRecord(serialized)).toEqual(serialized)
+    expect(verifyWire(serialized)).toBe(true)
+    expect(readRecord({ ...serialized, url: 'https://example.com/' })).toBeUndefined()
+  })
   it('round-trips a Web Crypto Ed25519 signature through the wire and vault verifier', () => {
     expect(signed.fromId).toBe(alice.did)
     expect(signed.roomId).toBe(GLOBAL_ROOM_ID)
@@ -189,16 +198,18 @@ describe('wire validation and signatures', () => {
     expect(parsed && isCatalog(parsed)).toBe(true)
     expect(readRecord({ ...profile, displayName: 'Changed' })).toBeUndefined()
   })
-  it('verifies a signed profile with a self-introduction', async () => {
-    const profile = await makeWire(alice, { type: 'gdmw:profile', displayName: 'Circle', bio: '**ゲーム**サークル', updatedAt: 25 })
+  it('verifies a signed profile with a self-introduction and avatar', async () => {
+    const profile = await makeWire(alice, { type: 'gdmw:profile', displayName: 'Circle', bio: '**ゲーム**サークル', avatarCid: 'A'.repeat(32), updatedAt: 25 })
     expect(readRecord(JSON.parse(JSON.stringify(profile)))).toEqual(profile)
     expect(readRecord({ ...profile, bio: 'Changed' })).toBeUndefined()
+    expect(readRecord({ ...profile, avatarCid: 'B'.repeat(32) })).toBeUndefined()
   })
   it.each([
     { displayName: '' }, { displayName: ' ' }, { displayName: ' Name' }, { displayName: 'Name ' },
     { displayName: 'a'.repeat(LIMITS.displayName + 1) }, { updatedAt: 0 }, { updatedAt: 1.5 },
     { updatedAt: 25 + CLOCK_SKEW_MS + 1 }, { subject: 'elsewhere' },
     { bio: '' }, { bio: ' About' }, { bio: 'a'.repeat(LIMITS.bio + 1) }, { bio: 1 },
+    { avatarCid: '' }, { avatarCid: 'https://example.com/image.png' }, { avatarCid: 1 },
   ])('rejects an invalid profile even when correctly signed (%o)', async update => {
     const fields = {
       v: 1, roomId: GLOBAL_ROOM_ID, fromId: alice.did,

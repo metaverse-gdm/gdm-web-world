@@ -11,16 +11,16 @@ import { isMistlSite } from '../lib/mistlSite'
 import { GroupLink } from './Groups'
 import { Thumbnail } from './Thumbnail'
 
-export function ProjectCard({ project, displayNameFor, group, onOpen }: {
-  project: ProjectRecord; displayNameFor(did: string): string | undefined; group?: GroupView; onOpen(): void
+export function ProjectCard({ project, displayNameFor, avatarFor, group, onOpen }: {
+  project: ProjectRecord; displayNameFor(did: string): string | undefined; avatarFor?(did: string): string | undefined; group?: GroupView; onOpen(): void
 }) {
   const author = personId(project)
   return <ProjectCardView fields={project} projectId={project.projectId} updatedAt={project.updatedAt}
-    authorDid={author} authorName={displayNameFor(author)} group={group} onOpen={onOpen} />
+    authorDid={author} authorName={displayNameFor(author)} authorAvatarCid={avatarFor?.(author)} group={group} onOpen={onOpen} />
 }
 
-export function ProjectCardView({ fields, projectId, updatedAt, authorDid, authorName, group, onOpen, preview = false }: {
-  fields: ProjectFields; projectId?: string; updatedAt: number; authorDid: string; authorName?: string; group?: GroupView
+export function ProjectCardView({ fields, projectId, updatedAt, authorDid, authorName, authorAvatarCid, group, onOpen, preview = false }: {
+  fields: ProjectFields; projectId?: string; updatedAt: number; authorDid: string; authorName?: string; authorAvatarCid?: string; group?: GroupView
   onOpen?(): void; preview?: boolean
 }) {
   const t = useMessages()
@@ -31,7 +31,7 @@ export function ProjectCardView({ fields, projectId, updatedAt, authorDid, autho
   const displayTitle = untitled ? t.previewUntitled : title
   const fallbackId = useId()
   const titleId = `project-title-${projectId ?? fallbackId}`
-  const url = preview && !isHttpUrl(fields.url) ? '' : fields.url
+  const url = isHttpUrl(fields.url) ? fields.url : undefined
   const repoUrl = preview && !isHttpUrl(fields.repoUrl) ? undefined : fields.repoUrl
   return <article class="work-card work-card--games" aria-labelledby={titleId}>
     <div class="work-visual"><Thumbnail {...coverFor(fields)} projectUrl={url} title={displayTitle} decorative /></div>
@@ -47,10 +47,10 @@ export function ProjectCardView({ fields, projectId, updatedAt, authorDid, autho
       <p class="work-meta">
         <DateText at={updatedAt} dateOnly /><span aria-hidden="true"> · </span>
         <span class="sr-only">{t.author} </span>
-        <AuthorLink did={authorDid} name={authorName} link={!preview} />
+        <AuthorLink did={authorDid} name={authorName} avatarCid={authorAvatarCid} link={!preview} />
         {group && <><span aria-hidden="true"> · </span><span class="sr-only">{t.group} </span><GroupLink group={group} link={!preview} /></>}
       </p>
-      <Tags tags={fields.tags} />
+      <Tags tags={fields.tags} link={!preview} />
       <p class="work-description" lang={locale}>{summary}</p>
       {(url || repoUrl) && <div class="work-actions">
         {url && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpen}>{isMistlSite(url) ? t.playWithMistl : t.open}</ExternalLink>}

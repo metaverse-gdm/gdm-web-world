@@ -144,7 +144,7 @@ it('shows the automatic thumbnail and hint only while the gallery is empty', asy
   vi.stubGlobal('IntersectionObserver', undefined)
   const projectUrl = 'http://example.com/game'
   setup([], projectUrl)
-  expect(host.textContent).toContain('Without images, a thumbnail is fetched automatically from the project URL.')
+  expect(host.textContent).toContain('Without images, a thumbnail is fetched automatically if you provide a project URL.')
   expect(host.querySelector('.media-editor-auto-cover .media-editor-cover-badge')?.textContent).toBe('Thumbnail')
   await vi.waitFor(() => expect(host.querySelector('.media-editor-auto-cover img')?.getAttribute('src')).toBe(image))
   expect(resolvePreviewImage).toHaveBeenCalledExactlyOnceWith(projectUrl)

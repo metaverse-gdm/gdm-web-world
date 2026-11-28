@@ -8,8 +8,9 @@ import { Icon } from './Icon'
 import { ProjectGrid } from './ProjectGrid'
 import { Select } from './Select'
 
-export function CatalogPage({ projects, displayNameFor, groupFor, trackProject, impressionsActive, label, emptyMessage }: {
+export function CatalogPage({ projects, displayNameFor, avatarFor, groupFor, trackProject, impressionsActive, label, emptyMessage }: {
   projects: ReadonlyMap<string, ProjectRecord>; displayNameFor(did: string): string | undefined
+  avatarFor?(did: string): string | undefined
   groupFor(project: ProjectRecord): GroupView | undefined
   trackProject(id: string, metric: StatsMetric): void; impressionsActive: boolean; label?: string; emptyMessage?: string
 }) {
@@ -46,7 +47,7 @@ export function CatalogPage({ projects, displayNameFor, groupFor, trackProject, 
       ]} />
     </div>
     <span class="sr-only" role="status">{t.results(shown.length)}</span>
-    <ProjectGrid projects={shown} order={order} label={label ?? t.catalog} displayNameFor={displayNameFor} groupFor={groupFor}
+    <ProjectGrid projects={shown} order={order} label={label ?? t.catalog} displayNameFor={displayNameFor} avatarFor={avatarFor} groupFor={groupFor}
       trackProject={trackProject} impressionsActive={impressionsActive} />
     {shown.length === 0 && (entries.length === 0
       ? <EmptyState message={emptyMessage ?? t.noProjects} />

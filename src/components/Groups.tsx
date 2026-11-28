@@ -8,6 +8,8 @@ import type { Runtime } from '../lib/runtime'
 import { compareStrings } from '../lib/wireSign'
 import { LIMITS } from '../lib/wires'
 import { CatalogPage } from './Catalog'
+import { Avatar } from './Avatar'
+import { AvatarEditor } from './AvatarEditor'
 import { AuthorLink, BackLink, ConfirmDialog, EmptyState, ErrorText } from './common'
 import { Icon } from './Icon'
 import { MarkdownView } from './MarkdownView'
@@ -17,7 +19,7 @@ export function GroupLink({ group, link = true }: { group: GroupView; link?: boo
   const Element = link ? 'a' : 'span'
   return <Element class="group-link" href={link ? groupHref(group.record.groupId) : undefined}
     aria-label={link ? t.groups.view(group.record.name) : undefined}>
-    <Icon name="users" /><bdi>{group.record.name}</bdi>
+    <Avatar cid={group.record.avatarCid} group /><bdi>{group.record.name}</bdi>
   </Element>
 }
 
@@ -90,11 +92,11 @@ function GroupCard({ runtime, group }: { runtime: Runtime; group: GroupView }) {
   const titleId = useId()
   const projects = groupProjects(runtime.getCatalog(), group.record.groupId).size
   return <article class="group-card" aria-labelledby={titleId}>
-    <h2 id={titleId}><a class="card-title" href={groupHref(group.record.groupId)}>{group.record.name}</a></h2>
+    <h2 id={titleId}><a class="card-title group-card-title" href={groupHref(group.record.groupId)}><Avatar cid={group.record.avatarCid} group />{group.record.name}</a></h2>
     <p class="work-meta">
       <span>{t.groups.count(group.members.length, projects)}</span><span aria-hidden="true"> · </span>
       <span class="sr-only">{t.groups.owner} </span>
-      <AuthorLink did={group.owner} name={runtime.displayNameFor(group.owner)} />
+      <AuthorLink did={group.owner} name={runtime.displayNameFor(group.owner)} avatarCid={runtime.avatarFor(group.owner)} />
     </p>
     {group.record.bio && <div class="group-card-bio"><MarkdownView text={group.record.bio} /></div>}
   </article>
@@ -111,11 +113,11 @@ function MemberList({ runtime, group }: { runtime: Runtime; group: GroupView }) 
   ]
   return <ul class="member-list" aria-label={t.groups.members}>
     {group.members.map(did => <li key={did}>
-      <AuthorLink did={did} name={runtime.displayNameFor(did)} />
+      <AuthorLink did={did} name={runtime.displayNameFor(did)} avatarCid={runtime.avatarFor(did)} />
       {did === group.owner && <span class="member-badge">{t.groups.owner}</span>}
     </li>)}
     {pending.map(([did, label]) => <li key={did} data-pending>
-      <AuthorLink did={did} name={runtime.displayNameFor(did)} /><span class="member-badge member-badge--muted">{label}</span>
+      <AuthorLink did={did} name={runtime.displayNameFor(did)} avatarCid={runtime.avatarFor(did)} /><span class="member-badge member-badge--muted">{label}</span>
     </li>)}
   </ul>
 }
@@ -137,7 +139,7 @@ export function GroupPage({ groupId, runtime, impressionsActive }: { groupId: st
       <BackLink href="#/groups" label={t.groups.all} />
       <div class="panel profile-panel">
         <div class="row-between detail-heading">
-          <h1 id={headingId}><Icon name="users" /><bdi>{group.record.name}</bdi></h1>
+          <h1 id={headingId}><Avatar cid={group.record.avatarCid} group large /><bdi>{group.record.name}</bdi></h1>
           {(owner || remove) && <div class="actions">
             {owner && <a class="icon-button" href={`${groupHref(groupId)}/edit`} aria-label={t.groups.edit} data-tooltip={t.groups.edit}><Icon name="edit" /></a>}
             {remove && <button type="button" class="icon-button danger" aria-label={t.groups.remove} data-tooltip={t.groups.remove}
@@ -153,7 +155,7 @@ export function GroupPage({ groupId, runtime, impressionsActive }: { groupId: st
       <h2 class="person-projects-heading">{t.groups.projects}<span class="muted">{projects.size}</span></h2>
       {group.members.includes(self) && <p class="muted">{t.groups.projectsHint}</p>}
     </section>
-    <CatalogPage projects={projects} displayNameFor={runtime.displayNameFor} groupFor={runtime.groupFor} trackProject={runtime.trackProject}
+    <CatalogPage projects={projects} displayNameFor={runtime.displayNameFor} avatarFor={runtime.avatarFor} groupFor={runtime.groupFor} trackProject={runtime.trackProject}
       impressionsActive={impressionsActive} label={t.groups.projects} emptyMessage={t.groups.noProjects} />
     {opener && <ConfirmDialog message={t.groups.confirmRemove} confirm={t.groups.remove} opener={opener} onClose={accepted => {
       setOpener(undefined)
@@ -172,6 +174,8 @@ export function GroupForm({ runtime, group }: { runtime: Runtime; group?: GroupV
   const ids = useId()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(() => new Set(group?.record.members ?? []))
+  const [avatarCid, setAvatarCid] = useState(group?.record.avatarCid)
+  const [uploading, setUploading] = useState(false)
   const catalog = runtime.getCatalog()
   const self = runtime.getSelf().id
   const people = useMemo(() => [...catalog.roles]
@@ -190,16 +194,19 @@ export function GroupForm({ runtime, group }: { runtime: Runtime; group?: GroupV
     <BackLink href={group ? groupHref(group.record.groupId) : '#/groups'} />
     <form class="panel form-stack group-form" onSubmit={event => {
       event.preventDefault()
+      if (uploading || action.busy) return
       const data = new FormData(event.currentTarget)
       void action.run(async () => {
         const id = await runtime.saveGroup({
           name: String(data.get('name') ?? ''), bio: String(data.get('bio') ?? ''), members,
+          ...(avatarCid ? { avatarCid } : {}),
         }, group?.record.groupId)
         location.hash = groupHref(id)
       })
     }}>
       <h1 id={`${ids}-title`}>{group ? t.groups.edit : t.groups.create}</h1>
       <fieldset class="form-stack" disabled={action.busy}>
+        <AvatarEditor cid={avatarCid} group disabled={action.busy} onChange={setAvatarCid} onBusyChange={setUploading} />
         <label>{t.groups.name}
           <input name="name" required maxLength={LIMITS.groupName} defaultValue={group?.record.name ?? ''} autoFocus />
         </label>
@@ -227,7 +234,7 @@ export function GroupForm({ runtime, group }: { runtime: Runtime; group?: GroupV
                       else next.delete(did)
                       setSelected(next)
                     }} />
-                    <span class="member-option-name">{name
+                    <Avatar cid={runtime.avatarFor(did)} /><span class="member-option-name">{name
                       ? <bdi>{name}</bdi>
                       : <code>{did.slice(0, 15)}…{did.slice(-6)}</code>}</span>
                     {note && <span class="member-badge member-badge--muted">{note}</span>}
@@ -238,7 +245,7 @@ export function GroupForm({ runtime, group }: { runtime: Runtime; group?: GroupV
         </fieldset>
         <ErrorText message={action.error} />
         <div class="actions">
-          <button type="submit" class="primary">{group ? t.saveProfile : t.groups.create}</button>
+          <button type="submit" class="primary" disabled={uploading}>{group ? t.saveProfile : t.groups.create}</button>
         </div>
       </fieldset>
     </form>

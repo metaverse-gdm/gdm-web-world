@@ -1,9 +1,10 @@
 import { useContext, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { ComponentChildren, JSX } from 'preact'
-import { personHref } from '../hooks/useHashRoute'
+import { personHref, tagHref } from '../hooks/useHashRoute'
 import { useMessages } from '../i18n'
 import { isMistlSite, MISTL_RELEASES_URL } from '../lib/mistlSite'
 import { Icon } from './Icon'
+import { Avatar } from './Avatar'
 import { ToastContext } from './Toast'
 
 export function DateText({ at, dateOnly = false }: { at: number; dateOnly?: boolean }) {
@@ -37,7 +38,7 @@ export function CopyDid({ did, delegated = false, compact = false }: { did: stri
   </button>
 }
 
-export function PersonName({ did, name, delegated = false }: { did: string; name?: string; delegated?: boolean }) {
+export function PersonName({ did, name, avatarCid, delegated = false }: { did: string; name?: string; avatarCid?: string; delegated?: boolean }) {
   const t = useMessages()
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -91,7 +92,7 @@ export function PersonName({ did, name, delegated = false }: { did: string; name
         trigger.current?.focus({ preventScroll: true })
         setOpen(!open)
       }}>
-      {name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
+      <Avatar cid={avatarCid} />{name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
     </button>
     <span ref={popup} id={id} class="person-name-popup" aria-hidden={!open} inert={!open} data-open={open}>
       <CopyDid did={did} delegated={delegated} />
@@ -103,21 +104,23 @@ export function PersonName({ did, name, delegated = false }: { did: string; name
 }
 
 /** A person's name that opens their page, for places where browsing their work is the likely intent. */
-export function AuthorLink({ did, name, link = true }: { did: string; name?: string; link?: boolean }) {
+export function AuthorLink({ did, name, avatarCid, link = true }: { did: string; name?: string; avatarCid?: string; link?: boolean }) {
   const t = useMessages()
   const Element = link ? 'a' : 'span'
   return <span class="person-name">
     <Element class="person-name-trigger author-link" href={link ? personHref(did) : undefined}
       aria-label={link ? t.viewPerson(name ?? `${did.slice(0, 15)}…${did.slice(-6)}`) : undefined}>
-      {name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
+      <Avatar cid={avatarCid} />{name ? <bdi class="person-name-label">{name}</bdi> : <PersonDid did={did} short delegated={false} />}
     </Element>
   </span>
 }
 
-export function Tags({ tags }: { tags: string[] }) {
+export function Tags({ tags, link = true }: { tags: string[]; link?: boolean }) {
   const t = useMessages()
   return tags.length > 0 && <ul class="work-tags" aria-label={t.tags}>
-    {tags.map(tag => <li key={tag}>{tag}</li>)}
+    {tags.map(tag => <li key={tag}>{link
+      ? <a href={tagHref(tag)} onClick={event => event.stopPropagation()}>{tag}</a>
+      : <span>{tag}</span>}</li>)}
   </ul>
 }
 
@@ -135,7 +138,7 @@ export function ExternalLink({ href, primary = false, children, onOpen }: {
 }
 
 /** Shown under a work whose URL is a mistl-hosted site (opens only where mistl runs). */
-export function MistlNote({ url }: { url: string }) {
+export function MistlNote({ url }: { url?: string }) {
   const t = useMessages()
   if (!isMistlSite(url)) return null
   return <p class="muted mistl-note">{t.mistlRequired}{' '}

@@ -7,6 +7,8 @@ import { createLocalPreferences } from './lib/localPreferences'
 import { createRuntime } from './lib/runtime'
 import type { Runtime } from './lib/runtime'
 import { createStatsStore } from './lib/statsStore'
+import * as thumbnails from './lib/thumbnails'
+import { tagHref } from './hooks/useHashRoute'
 import { projectGroup } from './lib/catalogStore'
 import type { GroupView } from './lib/catalogStore'
 import type { GroupRecord, ProjectRecord, Role } from './lib/wires'
@@ -45,7 +47,7 @@ afterEach(() => {
 })
 
 async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public',
-  groupsFor: (self: string) => Map<string, GroupView> = () => new Map()) {
+  groupsFor: (self: string) => Map<string, GroupView> = () => new Map(), avatarCid?: string) {
   let refresh: () => void
   const deleteProject = vi.fn(async () => {
     projects = new Map()
@@ -56,6 +58,7 @@ async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public'
   const trackProject = vi.fn()
   const getProjectStats = vi.fn(() => createStatsStore().summary(PROJECT_ID, project.fromId))
   const saveProfile = vi.fn(async () => {})
+  const saveGroup = vi.fn(async () => GROUP_ID)
   const setGroupMembership = vi.fn(async () => {})
   const groups = groupsFor(id)
   vi.mocked(createRuntime).mockResolvedValue({
@@ -66,7 +69,9 @@ async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public'
     getNetwork: () => ({ status: 'joined', peers: 0 }),
     displayNameFor: (did: string) => did === project.fromId ? 'Team Sakura' : undefined,
     bioFor: (did: string) => did === project.fromId ? 'We make **games**.' : undefined,
+    avatarFor: (did: string) => did === project.fromId ? avatarCid : undefined,
     saveProfile,
+    saveGroup,
     subscribe(listener: () => void) {
       refresh = listener
       return () => {}
@@ -81,6 +86,7 @@ async function setup(viewer: 'author' | 'admin' | 'member' | 'public' = 'public'
   return {
     deleteProject,
     saveProfile,
+    saveGroup,
     setGroupMembership,
     trackProject,
     getProjectStats,
@@ -279,6 +285,89 @@ it('lets an approved author edit their profile on their own page', async () => {
   expect(host.querySelector('.profile-editor')).toBeNull()
 })
 
+it('uploads a profile image with the gallery uploader and includes it when saving', async () => {
+  history.replaceState(null, '', `#/u/${project.fromId}`)
+  const cid = 'A'.repeat(32)
+  const upload = vi.spyOn(thumbnails, 'saveMediaImage').mockResolvedValue(cid)
+  vi.spyOn(thumbnails, 'loadMediaImage').mockResolvedValue('blob:avatar')
+  const { saveProfile } = await setup('author')
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Edit profile"]')!.click())
+  const form = host.querySelector<HTMLFormElement>('.profile-editor')!
+  const picker = form.querySelector<HTMLInputElement>('input[type="file"]')!
+  const file = new File(['image'], 'avatar.png', { type: 'image/png' })
+  const transfer = new DataTransfer()
+  transfer.items.add(file)
+  picker.files = transfer.files
+  await act(async () => { picker.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(upload).toHaveBeenCalledExactlyOnceWith(file)
+  await vi.waitFor(() => expect(form.querySelector('.avatar-editor img')?.getAttribute('src')).toBe('blob:avatar'))
+  await act(async () => form.requestSubmit())
+  expect(saveProfile).toHaveBeenCalledWith({ displayName: 'Team Sakura', bio: 'We make **games**.', avatarCid: cid })
+})
+
+it('displays and removes an existing profile image', async () => {
+  history.replaceState(null, '', `#/u/${project.fromId}`)
+  const cid = 'A'.repeat(32)
+  vi.spyOn(thumbnails, 'loadMediaImage').mockResolvedValue('blob:avatar')
+  const { saveProfile } = await setup('author', undefined, cid)
+  await vi.waitFor(() => expect(host.querySelector('.profile-panel h1 .avatar img')).not.toBeNull())
+  expect(host.querySelector('.app-controls .avatar img')).not.toBeNull()
+  expect(host.querySelector('.work-meta .avatar img')).not.toBeNull()
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Edit profile"]')!.click())
+  const form = host.querySelector<HTMLFormElement>('.profile-editor')!
+  act(() => [...form.querySelectorAll('button')].find(button => button.textContent === 'Remove image')!.click())
+  expect(form.querySelector('.avatar-editor .avatar svg')).not.toBeNull()
+  await act(async () => form.requestSubmit())
+  expect(saveProfile).toHaveBeenCalledWith({ displayName: 'Team Sakura', bio: 'We make **games**.', avatarCid: null })
+})
+
+it('opens a tag page from a card, shows exact and related games, and preserves it behind the project dialog', async () => {
+  const identity = await createDidIdentity()
+  const tag = 'RPG / 日本語'
+  const thumbnailUrl = 'https://example.com/cover.png'
+  project = await upsert(identity, { title: 'Main game', tags: [tag, 'story'], thumbnailUrl })
+  const related = await upsert(identity, { projectId: '190b17ef-7ad2-43e4-b374-351e89cc5c45', title: 'Related game', tags: ['Story'], thumbnailUrl })
+  const unrelated = await upsert(identity, { projectId: '190b17ef-7ad2-43e4-b374-351e89cc5c46', title: 'Unrelated game', tags: ['action'], thumbnailUrl })
+  projects = new Map([project, related, unrelated].map(item => [item.projectId, item]))
+  const { trackProject } = await setup()
+  const link = host.querySelector<HTMLAnchorElement>(`.work-tags a[href="${tagHref(tag)}"]`)!
+  expect(link.tabIndex).toBe(0)
+  const bubbled = vi.fn()
+  link.closest('article')!.addEventListener('click', bubbled)
+  await act(async () => link.click())
+  await vi.waitFor(() => expect(host.querySelector('.tag-page')).not.toBeNull())
+  expect(location.hash).toBe(tagHref(tag))
+  expect(bubbled).not.toHaveBeenCalled()
+  expect(dialog()).toBeNull()
+  expect(trackProject).not.toHaveBeenCalled()
+  expect(host.querySelector('#tag-heading')?.textContent).toContain(tag)
+  expect([...host.querySelectorAll('.tag-section .work-grid .card-title')].map(item => item.textContent)).toEqual(['Main game', 'Related game'])
+  expect(host.querySelector('#similar-heading')?.textContent).toBe('Similar games')
+  const page = host.querySelector('.tag-page')
+  act(() => card().click())
+  expect(dialog().open).toBe(true)
+  expect(host.querySelector('.tag-page')).toBe(page)
+  await act(async () => dialog().querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click())
+  await vi.waitFor(() => expect(dialog()).toBeNull())
+  expect(location.hash).toBe(tagHref(tag))
+  expect(host.querySelector('.tag-page')).toBe(page)
+  expect(document.activeElement).toBe(card())
+})
+
+it('navigates from a detail tag and closes the project dialog, hiding the empty similar section', async () => {
+  history.replaceState(null, '', detailHash)
+  await setup()
+  const tag = project.tags[0]
+  const link = dialog().querySelector<HTMLAnchorElement>('.work-tags a')!
+  expect(link.getAttribute('href')).toBe(tagHref(tag))
+  await act(async () => link.click())
+  await vi.waitFor(() => expect(host.querySelector('.tag-page')).not.toBeNull())
+  expect(location.hash).toBe(tagHref(tag))
+  expect(dialog()).toBeNull()
+  expect(host.querySelector('#similar-heading')).toBeNull()
+  expect(host.querySelector('.tag-page .back-link')?.getAttribute('href')).toBe('#/')
+})
+
 it("shows only the chosen person's projects and an empty state for others", async () => {
   const other = (await createDidIdentity()).did
   history.replaceState(null, '', `#/u/${other}`)
@@ -289,10 +378,21 @@ it("shows only the chosen person's projects and an empty state for others", asyn
 })
 
 const GROUP_ID = '7c1e3d0a-5b2f-4c8d-9e6a-1f2b3c4d5e6f'
-function circle(invited: string[] = []): Map<string, GroupView> {
-  const record = { groupId: GROUP_ID, name: 'Sakura Circle', bio: 'A **game** circle.', members: invited, updatedAt: 30 } as unknown as GroupRecord
+function circle(invited: string[] = [], avatarCid?: string): Map<string, GroupView> {
+  const record = { groupId: GROUP_ID, name: 'Sakura Circle', bio: 'A **game** circle.', members: invited, updatedAt: 30, avatarCid } as unknown as GroupRecord
   return new Map([[GROUP_ID, { record, owner: project.fromId, members: [project.fromId], invited, declined: [] }]])
 }
+
+it('lets a group owner clear a group avatar in the existing group editor', async () => {
+  history.replaceState(null, '', `#/g/${GROUP_ID}/edit`)
+  vi.spyOn(thumbnails, 'loadMediaImage').mockResolvedValue('blob:group-avatar')
+  const { saveGroup } = await setup('author', () => circle([], 'A'.repeat(32)))
+  const form = host.querySelector<HTMLFormElement>('.group-form')!
+  await vi.waitFor(() => expect(form.querySelector('.avatar-editor img')?.getAttribute('src')).toBe('blob:group-avatar'))
+  act(() => [...form.querySelectorAll('button')].find(button => button.textContent === 'Remove image')!.click())
+  await act(async () => form.requestSubmit())
+  expect(saveGroup).toHaveBeenCalledWith({ name: 'Sakura Circle', bio: 'A **game** circle.', members: [] }, GROUP_ID)
+})
 
 it('keeps the groups page heading accessible without displaying a redundant title', async () => {
   history.replaceState(null, '', '#/groups')

@@ -52,7 +52,7 @@ export function ApprovalPrompt({ runtime }: { runtime: Runtime }) {
 
 function fromProject(project: ProjectRecord): Draft {
   const { title, summary, description, lang, translations, url, repoUrl, tags, thumbnailCid, thumbnailUrl, media, groupId } = project
-  return foldLegacyCover({ title, summary, description, lang, translations, url, repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl, media, groupId })
+  return foldLegacyCover({ title, summary, description, lang, translations, url: url ?? '', repoUrl: repoUrl ?? '', tags: tags.join(', '), thumbnailCid, thumbnailUrl, media, groupId })
 }
 
 const emptyText: ProjectText = { title: '', summary: '', description: '' }
@@ -187,6 +187,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
       }
       setIssue(undefined)
       void form.run(async () => {
+        if (fields.url !== undefined && !isHttpUrl(fields.url)) throw new Error(t.invalidUrl)
         const id = await runtime.saveProject(fields, project?.projectId)
         runtime.preferences.setDraft(slot, null)
         location.hash = `#/p/${id}`
@@ -236,7 +237,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
           </div>)}
         </div>
         <div class="form-columns">
-          <label>{t.projectUrl}<input type="url" required maxLength={LIMITS.url} placeholder="https://"
+          <label>{t.projectUrl}<input type="url" maxLength={LIMITS.url} placeholder="https://"
             value={draft.url} onInput={e => update({ url: e.currentTarget.value })} />
             <small class="muted field-hint">{t.projectUrlHint}</small></label>
           <label>{t.repoUrl}<input type="url" maxLength={LIMITS.url} placeholder="https://"
@@ -256,7 +257,7 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
         <button type="button" onClick={() => setPreviewing(true)}>{t.preview}</button>
       </div>
       {previewing && <ProjectPreviewDialog fields={draftToFields({ ...draft, groupId }, primary, pendingTag)}
-        authorDid={self} authorName={runtime.displayNameFor(self)}
+        authorDid={self} authorName={runtime.displayNameFor(self)} authorAvatarCid={runtime.avatarFor(self)}
         group={myGroups.find(group => group.record.groupId === groupId)} onClose={() => setPreviewing(false)} />}
     </ValidatedForm>
   </section>

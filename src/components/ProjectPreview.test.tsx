@@ -11,7 +11,7 @@ const t = messages.en
 const imageUrl = 'https://example.com/train.png'
 const fields: ProjectFields = {
   title: 'Train timetable', summary: 'A railway simulation', description: 'Drive a **train**.',
-  lang: 'en', url: '', tags: ['simulation'],
+  lang: 'en', tags: ['simulation'],
   media: [{ url: imageUrl }],
 }
 const updatedAt = Date.UTC(2026, 10, 28)
@@ -66,6 +66,26 @@ it('uses the localized untitled fallback for either view', () => {
   expect(dialog().querySelector('.detail-heading h1')?.textContent).toBe(t.previewUntitled)
   act(() => tab(t.previewCard).click())
   expect(dialog().querySelector('.work-card h2')?.textContent).toBe(t.previewUntitled)
+})
+
+it.each([false, true])('does not show a play link or site preview without a URL (preview: %s)', preview => {
+  const data = { fields: { ...fields, media: undefined }, updatedAt, authorDid, authorName, preview }
+  act(() => render(<><ProjectDetailBody {...data} />
+    <ProjectCardView {...data} projectId="project" /></>, host))
+  expect(host.querySelector('a.button')).toBeNull()
+  expect(host.querySelector('.detail-panel .actions, .work-actions, .mistl-note')).toBeNull()
+  expect(host.querySelector('.detail-panel .thumbnail, .work-card img')).toBeNull()
+  expect(host.querySelector('.work-card .image-fallback')?.textContent).toBe('T')
+  expect(host.querySelector('.detail-heading h1')?.textContent).toBe(fields.title)
+})
+
+it('retains repository links when the project URL is absent', () => {
+  const repoUrl = 'https://example.com/repo'
+  const data = { fields: { ...fields, repoUrl }, updatedAt, authorDid, authorName }
+  act(() => render(<><ProjectDetailBody {...data} /><ProjectCardView {...data} /></>, host))
+  const links = [...host.querySelectorAll<HTMLAnchorElement>('a.button')]
+  expect(links.map(link => link.getAttribute('href'))).toEqual([repoUrl, repoUrl])
+  expect(host.querySelector('.mistl-note')).toBeNull()
 })
 
 it('switches between the real catalog card and the detail view without linking the draft to a route', () => {

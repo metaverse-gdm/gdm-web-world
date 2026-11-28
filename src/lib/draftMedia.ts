@@ -23,7 +23,7 @@ export function foldLegacyCover(draft: Draft): Draft {
 }
 
 /** Build the same fields for an unsaved preview and for publishing.
- * The caller still validates required text and project URLs before saving.
+ * The caller still validates required text and any supplied URLs before saving.
  */
 export function draftToFields(draft: Draft, primary: Language, pendingTag = ''): ProjectFields {
   const value = foldLegacyCover(draft)
@@ -35,10 +35,11 @@ export function draftToFields(draft: Draft, primary: Language, pendingTag = ''):
   })
   const [main = { language: primary, text: { title: '', summary: '', description: '' } }, ...others] = filled
   const media = value.media?.filter(item => validMediaItem(item))
+  const url = value.url.trim()
   return {
     ...main.text, lang: main.language,
     translations: others.length ? Object.fromEntries(others.map(({ language, text }) => [language, text])) : undefined,
-    url: value.url.trim(), repoUrl: value.repoUrl.trim() || undefined,
+    ...(url ? { url } : {}), repoUrl: value.repoUrl.trim() || undefined,
     tags: mergeTags(mergeTags([], value.tags), pendingTag),
     ...(media?.length ? { media } : {}),
     ...(value.groupId ? { groupId: value.groupId } : {}),

@@ -27,7 +27,7 @@ export type ProjectText = { title: string; summary: string; description: string 
 export type MediaItem = { cid: string; thumb?: string } | { url: string }
 export type ProjectFields = ProjectText & {
   lang?: Language; translations?: Partial<Record<Language, ProjectText>>
-  url: string; repoUrl?: string; tags: string[]; thumbnailCid?: string; thumbnailUrl?: string
+  url?: string; repoUrl?: string; tags: string[]; thumbnailCid?: string; thumbnailUrl?: string
   /** Gallery shown on the detail view, in order. Omitted rather than empty. */
   media?: MediaItem[]
   /** Shown under the group only while the author is one of its current members. */
@@ -42,14 +42,14 @@ type Approval = {
   requestSignature?: string
 }
 type Revocation = { type: 'gdmw:revocation'; subject: string; revokedAt: number }
-export type GroupFields = { name: string; bio?: string; members: string[] }
+export type GroupFields = { name: string; bio?: string; avatarCid?: string; members: string[] }
 type GroupUpsert = GroupFields & {
   type: 'gdmw:group-upsert'; groupId: string; createdAt: number; updatedAt: number; rev: number
 }
 type GroupDelete = { type: 'gdmw:group-delete'; groupId: string; deletedAt: number }
 /** Signed by an invited person to accept (`joined`) or leave a group. */
 type GroupMembership = { type: 'gdmw:group-membership'; groupId: string; joined: boolean; updatedAt: number }
-type Profile = { type: 'gdmw:profile'; displayName: string; bio?: string; updatedAt: number }
+type Profile = { type: 'gdmw:profile'; displayName: string; bio?: string; avatarCid?: string; updatedAt: number }
 type ApprovalRequest = { type: 'gdmw:approval-request'; displayName: string; message: string; requestedAt: number }
 type RequestReject = { type: 'gdmw:request-reject'; subject: string; requestSignature: string; rejectedAt: number }
 export const STATS_FLAGS = { impression: 1, detail: 2, click: 4 } as const
@@ -138,7 +138,8 @@ export function validMediaList(value: unknown, draft = false): value is MediaIte
 
 const projectKeys = ['title', 'summary', 'description', 'lang', 'translations', 'url', 'repoUrl', 'tags', 'thumbnailCid', 'thumbnailUrl', 'media', 'groupId']
 export function validProjectFields(value: Record<string, unknown>): boolean {
-  return validProjectText(value, false) && validProjectLanguages(value) && isHttpUrl(value.url)
+  return validProjectText(value, false) && validProjectLanguages(value)
+    && (value.url === undefined || isHttpUrl(value.url))
     && (value.repoUrl === undefined || isHttpUrl(value.repoUrl))
     && Array.isArray(value.tags) && value.tags.length <= LIMITS.tags
     && value.tags.every(tag => bounded(tag, LIMITS.tag) && tag.trim() === tag)
@@ -152,6 +153,7 @@ export function validProjectFields(value: Record<string, unknown>): boolean {
 export function validGroupFields(value: Record<string, unknown>): boolean {
   return bounded(value.name, LIMITS.groupName) && value.name.trim() === value.name
     && (value.bio === undefined || bounded(value.bio, LIMITS.bio) && value.bio.trim() === value.bio)
+    && (value.avatarCid === undefined || validCid(value.avatarCid))
     && Array.isArray(value.members) && value.members.length <= LIMITS.groupMembers
     && value.members.every(validDid) && new Set(value.members).size === value.members.length
 }
@@ -178,11 +180,12 @@ function validate(value: unknown, recordsOnly = false): value is Wire {
     case 'gdmw:revocation':
       return fields('subject', 'revokedAt') && validDid(value.subject) && validDate(value.revokedAt)
     case 'gdmw:profile':
-      return fields('displayName', 'bio', 'updatedAt') && bounded(value.displayName, LIMITS.displayName)
+      return fields('displayName', 'bio', 'avatarCid', 'updatedAt') && bounded(value.displayName, LIMITS.displayName)
         && value.displayName.trim() === value.displayName && validDate(value.updatedAt)
         && (value.bio === undefined || bounded(value.bio, LIMITS.bio) && value.bio.trim() === value.bio)
+        && (value.avatarCid === undefined || validCid(value.avatarCid))
     case 'gdmw:group-upsert':
-      return fields('groupId', 'createdAt', 'updatedAt', 'rev', 'name', 'bio', 'members')
+      return fields('groupId', 'createdAt', 'updatedAt', 'rev', 'name', 'bio', 'avatarCid', 'members')
         && validId(value.groupId) && validDate(value.createdAt) && validDate(value.updatedAt)
         && value.updatedAt >= value.createdAt && validInteger(value.rev, Number.MAX_SAFE_INTEGER) && validGroupFields(value)
     case 'gdmw:group-delete':

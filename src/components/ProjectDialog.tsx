@@ -21,7 +21,7 @@ export function ProjectDialog({ projectId, project, active, runtime, failed, onE
     return () => {
       element.close()
       if (opener instanceof HTMLAnchorElement && opener.matches('.card-title') && opener.isConnected
-        && ['catalog', 'person'].includes(readRoute(location.hash).page)) opener.focus({ preventScroll: true })
+        && ['catalog', 'person', 'group', 'tag'].includes(readRoute(location.hash).page)) opener.focus({ preventScroll: true })
     }
   }, [])
 

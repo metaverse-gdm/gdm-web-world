@@ -70,7 +70,7 @@ export function AdminPage({ runtime }: { runtime: Runtime }) {
           const root = ROOT_ADMIN_DIDS.includes(did)
           return <li class="row-between user-row" key={did}>
             <div><strong>{root ? t.rootAdmin : role === 'admin' ? t.administrator : t.member}</strong>
-              <PersonName did={did} name={runtime.displayNameFor(did)} delegated={leaves.has(did)} />
+              <PersonName did={did} name={runtime.displayNameFor(did)} avatarCid={runtime.avatarFor(did)} delegated={leaves.has(did)} />
               {[...leaves.get(did) ?? []].sort().map(leaf => <div key={leaf} class="muted">{t.browserDid} <code>{leaf}</code></div>)}
             </div>
             {!root && <button class="danger" disabled={action.busy}

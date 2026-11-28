@@ -10,6 +10,7 @@ interface GridProps {
   order: string
   label: string
   displayNameFor(did: string): string | undefined
+  avatarFor?(did: string): string | undefined
   groupFor(project: ProjectRecord): GroupView | undefined
   trackProject(id: string, metric: StatsMetric): void
   impressionsActive: boolean
@@ -73,10 +74,10 @@ export class ProjectGrid extends Component<GridProps> {
     this.hasShown = true
   }
 
-  render({ projects, label, displayNameFor, groupFor, trackProject }: GridProps) {
+  render({ projects, label, displayNameFor, avatarFor, groupFor, trackProject }: GridProps) {
     return <ul class="work-grid" aria-label={label} hidden={!projects.length} ref={this.grid}>
       {projects.map(project => <li key={project.projectId} data-project={project.projectId}>
-        <ProjectCard project={project} displayNameFor={displayNameFor} group={groupFor(project)} onOpen={() => trackProject(project.projectId, 'click')} />
+        <ProjectCard project={project} displayNameFor={displayNameFor} avatarFor={avatarFor} group={groupFor(project)} onOpen={() => trackProject(project.projectId, 'click')} />
       </li>)}
     </ul>
   }
