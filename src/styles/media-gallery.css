@@ -14,8 +14,8 @@
   display: block; width: 100%; height: 100%; border: 0; background: var(--media-stage); object-fit: contain;
 }
 .media-gallery-visual img {
-  position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; opacity: 0;
-  transition: opacity var(--duration-small) var(--ease-out);
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; opacity: 0;
+  transition: opacity var(--duration-small) var(--ease-out), transform var(--duration-page) var(--ease-out);
 }
 .media-gallery-visual img[data-loaded="true"] { opacity: 1; }
 .media-gallery-fallback {
@@ -99,6 +99,10 @@
   position: absolute; inset: auto 3px 3px auto; width: 20px; height: 20px; border-radius: 50%;
 }
 .media-gallery-thumb-play svg { width: 13px; height: 13px; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .media-gallery-image:hover .media-gallery-visual img,
+  .media-gallery-thumb:hover .media-gallery-visual img { transform: scale(1.05); }
+}
 
 /* Native top-layer dialog, including when opened within a project dialog. */
 html:has(.media-lightbox[open]) { overflow: hidden; }

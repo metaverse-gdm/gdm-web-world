@@ -237,7 +237,8 @@ export function ProjectForm({ runtime, project }: { runtime: Runtime; project?: 
         </div>
         <div class="form-columns">
           <label>{t.projectUrl}<input type="url" required maxLength={LIMITS.url} placeholder="https://"
-            value={draft.url} onInput={e => update({ url: e.currentTarget.value })} /></label>
+            value={draft.url} onInput={e => update({ url: e.currentTarget.value })} />
+            <small class="muted field-hint">{t.projectUrlHint}</small></label>
           <label>{t.repoUrl}<input type="url" maxLength={LIMITS.url} placeholder="https://"
             value={draft.repoUrl} onInput={e => update({ repoUrl: e.currentTarget.value })} /></label>
         </div>

@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { useMessages } from '../i18n'
 import { resolvePreviewImage, resolveScreenshot } from '../lib/linkPreview'
 import { loadMediaImage, loadThumbnail } from '../lib/thumbnails'
+import { isMistlSite } from '../lib/mistlSite'
 
 type Props = { cid?: string; url?: string; projectUrl?: string; title?: string; decorative?: boolean; onError?: () => void; mediaImage?: boolean }
 
 export function Thumbnail({ cid, url, projectUrl, title, decorative, onError, mediaImage }: Props) {
   const host = useRef<HTMLDivElement>(null)
-  const auto = !cid && !url ? projectUrl : undefined
+  // mistl-hosted sites live on the viewer's loopback: never fetch them for a
+  // preview or hand their URL to the screenshot service.
+  const auto = !cid && !url && !isMistlSite(projectUrl) ? projectUrl : undefined
   const source = cid ?? url ?? auto
   const [seen, setSeen] = useState<string>()
   const visible = source !== undefined && seen === source

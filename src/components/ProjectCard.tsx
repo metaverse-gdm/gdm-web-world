@@ -6,7 +6,8 @@ import { coverFor } from '../lib/cover'
 import { isHttpUrl, personId } from '../lib/wires'
 import type { GroupView } from '../lib/catalogStore'
 import type { ProjectFields, ProjectRecord } from '../lib/wires'
-import { AuthorLink, DateText, ExternalLink, Tags } from './common'
+import { AuthorLink, DateText, ExternalLink, MistlNote, Tags } from './common'
+import { isMistlSite } from '../lib/mistlSite'
 import { GroupLink } from './Groups'
 import { Thumbnail } from './Thumbnail'
 
@@ -52,9 +53,10 @@ export function ProjectCardView({ fields, projectId, updatedAt, authorDid, autho
       <Tags tags={fields.tags} />
       <p class="work-description" lang={locale}>{summary}</p>
       {(url || repoUrl) && <div class="work-actions">
-        {url && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpen}>{t.open}</ExternalLink>}
+        {url && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpen}>{isMistlSite(url) ? t.playWithMistl : t.open}</ExternalLink>}
         {repoUrl && <ExternalLink href={repoUrl} primary={!url}>{t.repository}</ExternalLink>}
       </div>}
+      <MistlNote url={url} />
     </div>
   </article>
 }

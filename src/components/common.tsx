@@ -2,6 +2,7 @@ import { useContext, useId, useLayoutEffect, useRef, useState } from 'preact/hoo
 import type { ComponentChildren, JSX } from 'preact'
 import { personHref } from '../hooks/useHashRoute'
 import { useMessages } from '../i18n'
+import { isMistlSite, MISTL_RELEASES_URL } from '../lib/mistlSite'
 import { Icon } from './Icon'
 import { ToastContext } from './Toast'
 
@@ -131,6 +132,14 @@ export function ExternalLink({ href, primary = false, children, onOpen }: {
     onClick={track} onAuxClick={track}>
     {children}<Icon name="external" /><span class="sr-only">{t.opensInNewTab}</span>
   </a>
+}
+
+/** Shown under a work whose URL is a mistl-hosted site (opens only where mistl runs). */
+export function MistlNote({ url }: { url: string }) {
+  const t = useMessages()
+  if (!isMistlSite(url)) return null
+  return <p class="muted mistl-note">{t.mistlRequired}{' '}
+    <a href={MISTL_RELEASES_URL} target="_blank" rel="noopener noreferrer">{t.getMistl}</a></p>
 }
 
 export function BackLink({ href = '#/', label }: { href?: string; label?: string }) {

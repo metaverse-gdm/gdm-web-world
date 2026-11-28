@@ -8,7 +8,8 @@ import type { ProjectFields, ProjectRecord } from '../lib/wires'
 import { isHttpUrl, personId } from '../lib/wires'
 import { useAction } from '../hooks/useAction'
 import { documentLanguages, LanguageContext, useMessages } from '../i18n'
-import { AuthorLink, BackLink, ConfirmDialog, DateText, ErrorText, ExternalLink, Tags } from './common'
+import { AuthorLink, BackLink, ConfirmDialog, DateText, ErrorText, ExternalLink, MistlNote, Tags } from './common'
+import { isMistlSite } from '../lib/mistlSite'
 import { GroupLink } from './Groups'
 import { Icon } from './Icon'
 import { MarkdownView } from './MarkdownView'
@@ -49,9 +50,10 @@ export function ProjectDetailBody({ fields, updatedAt, authorDid, authorName, gr
       ? <MediaGallery items={galleryItemsFor(fields)} title={displayTitle} lang={locale} />
       : <Thumbnail cid={fields.thumbnailCid} url={fields.thumbnailUrl} projectUrl={url} title={displayTitle} />}
     {(!preview || url || repoUrl) && <div class="actions">
-      {(!preview || url) && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpenProject}>{t.open}</ExternalLink>}
+      {(!preview || url) && <ExternalLink href={url} primary onOpen={preview ? undefined : onOpenProject}>{isMistlSite(url) ? t.playWithMistl : t.open}</ExternalLink>}
       {repoUrl && <ExternalLink href={repoUrl}>{t.repository}</ExternalLink>}
     </div>}
+    <MistlNote url={url} />
     {afterActions}
     {description && <div class="description" lang={locale}><MarkdownView text={description} tables /></div>}
   </div>
